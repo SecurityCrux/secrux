@@ -6,6 +6,10 @@
 # Local executor config (contains tokens)
 config.json
 
+# Local TLS artifacts (do not commit)
+gateway.key
+gateway.crt
+
 # Build outputs
 /executor-agent
 /secrux-agent
