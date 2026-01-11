@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.6
+
+ARG TRIVY_IMAGE=aquasec/trivy:latest
+FROM ${TRIVY_IMAGE}
+
+LABEL org.opencontainers.image.title="secrux-trivy-engine" \
+      org.opencontainers.image.description="Trivy engine container for Secrux" \
+      org.opencontainers.image.source="https://github.com/aquasecurity/trivy" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+ENV TRIVY_CACHE_DIR=/tmp/trivy-cache \
+    TRIVY_NO_PROGRESS=true
+
+WORKDIR /src
+
+COPY run-trivy.sh /usr/local/bin/run-trivy
+RUN chmod +x /usr/local/bin/run-trivy
+
+ENTRYPOINT ["/usr/local/bin/run-trivy"]
+CMD []
