@@ -201,7 +201,7 @@ services:
 
   secrux-console:
     build:
-      context: ./secrux-console
+      context: ./secrux-web
     restart: unless-stopped
     ports:
       - "${CONSOLE_PORT:-5173}:80"
