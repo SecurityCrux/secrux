@@ -1,0 +1,60 @@
+services:
+  ai-postgres:
+    image: postgres:15.7-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${AI_POSTGRES_DB:-secrux_ai}
+      POSTGRES_USER: ${AI_POSTGRES_USER:-secrux_ai}
+      POSTGRES_PASSWORD: ${AI_POSTGRES_PASSWORD:-secrux_ai}
+    volumes:
+      - ai_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AI_POSTGRES_USER:-secrux_ai} -d ${AI_POSTGRES_DB:-secrux_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ai-service:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      SECRUX_AI_SERVICE_TOKEN: ${SECRUX_AI_SERVICE_TOKEN:-local-dev-token}
+      AI_DATABASE_URL: ${AI_DATABASE_URL:-postgresql+psycopg://secrux_ai:secrux_ai@ai-postgres:5432/secrux_ai}
+      SECRUX_AI_LLM_BASE_URL: ${SECRUX_AI_LLM_BASE_URL:-}
+      SECRUX_AI_LLM_API_KEY: ${SECRUX_AI_LLM_API_KEY:-}
+      SECRUX_AI_LLM_MODEL: ${SECRUX_AI_LLM_MODEL:-}
+
+      SECRUX_AI_PROMPT_DUMP: ${SECRUX_AI_PROMPT_DUMP:-off}
+      SECRUX_AI_PROMPT_DUMP_DIR: ${SECRUX_AI_PROMPT_DUMP_DIR:-/app/storage/prompt-dumps}
+      SECRUX_AI_PROMPT_DUMP_FILE_STRATEGY: ${SECRUX_AI_PROMPT_DUMP_FILE_STRATEGY:-target}
+      SECRUX_AI_PROMPT_DUMP_FILTER_PURPOSE: ${SECRUX_AI_PROMPT_DUMP_FILTER_PURPOSE:-review}
+      SECRUX_AI_PROMPT_DUMP_FILTER_JOB_ID: ${SECRUX_AI_PROMPT_DUMP_FILTER_JOB_ID:-}
+      SECRUX_AI_PROMPT_DUMP_FILTER_TARGET_ID: ${SECRUX_AI_PROMPT_DUMP_FILTER_TARGET_ID:-}
+      SECRUX_AI_PROMPT_DUMP_FILTER_AGENT: ${SECRUX_AI_PROMPT_DUMP_FILTER_AGENT:-}
+      SECRUX_AI_PROMPT_DUMP_FILTER_MODE: ${SECRUX_AI_PROMPT_DUMP_FILTER_MODE:-}
+      SECRUX_AI_PROMPT_DUMP_INCLUDE_RESPONSE: ${SECRUX_AI_PROMPT_DUMP_INCLUDE_RESPONSE:-false}
+      SECRUX_AI_PROMPT_DUMP_INCLUDE_FINDING: ${SECRUX_AI_PROMPT_DUMP_INCLUDE_FINDING:-false}
+      SECRUX_AI_PROMPT_DUMP_INCLUDE_ENRICHMENT: ${SECRUX_AI_PROMPT_DUMP_INCLUDE_ENRICHMENT:-false}
+      SECRUX_AI_PROMPT_DUMP_MAX_CHARS: ${SECRUX_AI_PROMPT_DUMP_MAX_CHARS:-200000}
+    ports:
+      - "${AI_PORT:-5156}:5156"
+    depends_on:
+      ai-postgres:
+        condition: service_healthy
+    volumes:
+      - ai_mcp_data:/app/storage/mcps
+      - ai_agent_data:/app/storage/agents
+      - ai_prompt_dumps:/app/storage/prompt-dumps
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5156/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ai_postgres_data:
+  ai_mcp_data:
+  ai_agent_data:
+  ai_prompt_dumps:
+

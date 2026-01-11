@@ -1,0 +1,13 @@
+[project]
+name = "sarif-rules-mcp"
+version = "0.1.0"
+description = "MCP service that looks up rule metadata from SARIF 2.1.0 reports."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.5",
+    "uvicorn>=0.30.0"
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
