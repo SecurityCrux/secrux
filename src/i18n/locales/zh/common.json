@@ -1,0 +1,1187 @@
+{
+  "app": {
+    "name": "Secrux 控制台"
+  },
+  "users": {
+    "title": "用户管理",
+    "subtitle": "管理用户、资料与角色权限。",
+    "listTitle": "用户列表",
+    "searchPlaceholder": "按用户名或邮箱搜索",
+    "create": "创建用户",
+    "creating": "创建中...",
+    "error": "用户加载失败。",
+    "empty": "暂无用户。",
+    "editTitle": "编辑用户",
+    "accessDenied": "您没有权限管理用户。",
+    "columns": {
+      "username": "用户名",
+      "email": "邮箱",
+      "enabled": "启用状态",
+      "actions": "操作"
+    },
+    "actions": {
+      "edit": "编辑",
+      "enable": "启用",
+      "disable": "禁用",
+      "resetPassword": "重置密码",
+      "resetting": "重置中..."
+    },
+    "fields": {
+      "phone": "电话",
+      "name": "姓名",
+      "roles": "角色",
+      "effectivePermissions": "生效权限"
+    },
+    "rolesEmpty": "暂无可用角色。",
+    "errors": {
+      "passwordRequired": "必须填写密码。"
+    },
+    "prompts": {
+      "username": "用户名",
+      "email": "邮箱（可选）",
+      "password": "初始密码",
+      "resetPassword": "新密码"
+    }
+  },
+  "roles": {
+    "title": "角色管理",
+    "subtitle": "创建角色组并维护权限集。",
+    "listTitle": "角色列表",
+    "searchPlaceholder": "按 key 或名称搜索",
+    "create": "创建角色",
+    "builtIn": "内置",
+    "error": "角色加载失败。",
+    "empty": "暂无角色。",
+    "accessDenied": "您没有权限管理角色。",
+    "selectedCount": "已选 {{count}} 项",
+    "permissionFilter": "过滤权限…",
+    "noPermissions": "暂无权限。",
+    "columns": {
+      "name": "名称",
+      "key": "Key",
+      "description": "描述",
+      "actions": "操作"
+    },
+    "fields": {
+      "key": "Key",
+      "name": "名称",
+      "description": "描述",
+      "permissions": "权限"
+    },
+    "actions": {
+      "edit": "编辑",
+      "permissions": "权限",
+      "delete": "删除",
+      "confirmDelete": "确定删除该角色？"
+    },
+    "dialog": {
+      "createTitle": "创建角色",
+      "editTitle": "编辑角色",
+      "permissionsTitle": "编辑权限",
+      "permissionsHint": "正在编辑 {{name}} 的权限"
+    }
+  },
+  "tenant": {
+    "title": "租户",
+    "subtitle": "管理租户资料与设置。",
+    "cardTitle": "租户设置",
+    "error": "租户加载失败。",
+    "empty": "租户不存在。",
+    "accessDenied": "您没有权限管理租户设置。",
+    "fields": {
+      "name": "名称",
+      "contactEmail": "联系邮箱",
+      "tenantId": "租户 ID",
+      "plan": "套餐"
+    }
+  },
+  "auth": {
+    "title": "欢迎回来",
+    "subtitle": "登录以发起代码体检、基线对比与工单同步。",
+    "username": "用户名",
+    "password": "密码",
+    "remember": "记住这台设备",
+    "actions": {
+      "signin": "登录",
+      "signingIn": "登录中..."
+    },
+    "errors": {
+      "invalid": "用户名或密码错误",
+      "unexpected": "登录失败，请稍后重试。"
+    },
+    "success": "欢迎，{{name}}"
+  },
+  "language": {
+    "label": "语言",
+    "en": "English",
+    "zh": "简体中文"
+  },
+  "theme": {
+    "label": "主题",
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
+  },
+  "setup": {
+    "title": "欢迎使用 Secrux",
+    "subtitle": "请选择默认语言与主题风格。",
+    "continue": "开始使用"
+  },
+  "nav": {
+    "dashboard": "总览",
+    "projects": "项目",
+    "tasks": "任务探查",
+    "rules": "规则",
+    "findings": "漏洞",
+    "sca": "SCA",
+    "tickets": "工单",
+    "aiClients": "AI 客户端",
+    "aiKnowledge": "AI 知识库",
+    "executors": "执行机",
+    "users": "用户管理",
+    "roles": "角色管理",
+    "tenant": "租户"
+  },
+  "dashboard": {
+    "welcome": "你好，{{name}}",
+    "description": "可在左侧导航创建任务、查看阶段或同步工单。",
+    "stats": {
+      "projects": "项目数",
+      "repositories": "仓库数",
+      "runningTasks": "运行中任务",
+      "openFindings": "未处理漏洞",
+      "executors": "执行机数"
+    },
+    "sections": {
+      "recentTasks": "最近任务",
+      "topFindings": "高风险漏洞"
+    },
+    "empty": {
+      "recentTasks": "暂无任务。",
+      "topFindings": "暂无未处理漏洞。"
+    }
+  },
+  "tickets": {
+    "title": "工单管理",
+    "subtitle": "查看并跟踪由缺陷（代码漏洞 / 依赖缺陷）创建的外部工单。",
+    "actions": {
+      "create": "新建工单",
+      "reset": "重置筛选"
+    },
+    "filters": {
+      "title": "筛选条件",
+      "project": "项目",
+      "provider": "提供商",
+      "status": "状态",
+      "search": "搜索",
+      "searchPlaceholder": "按外部编号搜索"
+    },
+    "columns": {
+      "key": "外部编号",
+      "provider": "提供商",
+      "project": "项目",
+      "status": "状态",
+      "createdAt": "创建时间",
+      "actions": "操作"
+    },
+    "issueTypes": {
+      "bug": "缺陷",
+      "task": "任务",
+      "story": "用户故事"
+    },
+    "draft": {
+      "title": "暂存篮",
+      "count": "{{count}} 条缺陷",
+      "empty": "暂存篮为空，请先从漏洞或 SCA 页面暂存。",
+      "addSelected": "暂存到工单",
+      "clear": "清空",
+      "remove": "移除",
+      "goFindings": "去漏洞页",
+      "titleEn": "标题（英文）",
+      "titleZh": "标题（中文）",
+      "descEn": "描述（英文）",
+      "descZh": "描述（中文）"
+    },
+    "ai": {
+      "title": "AI 话术",
+      "generate": "AI 生成",
+      "polish": "AI 优化",
+      "apply": "应用",
+      "failed": "AI 失败：",
+      "preview": "预览"
+    },
+    "detail": {
+      "title": "工单详情",
+      "info": "详情信息",
+      "summary": "摘要",
+      "description": "描述",
+      "findings": "漏洞",
+      "scaIssues": "依赖缺陷",
+      "goSca": "去 SCA 页",
+      "raw": "原始内容"
+    },
+    "dialog": {
+      "title": "从暂存篮创建工单",
+      "subtitle": "使用暂存篮中的漏洞创建外部工单。",
+      "provider": "联动平台",
+      "issueType": "工单类型",
+      "clearDraftAfter": "创建后清空暂存篮",
+      "saveDraft": "保存草稿",
+      "errors": {
+        "required": "联动平台不能为空。",
+        "emptyDraft": "暂存篮为空。"
+      },
+      "submit": "提交工单"
+    },
+    "error": "工单数据加载失败。",
+    "empty": "暂无工单。"
+  },
+  "aiClients": {
+    "title": "AI 客户端管理",
+    "subtitle": "配置用于自动复核的模型与 API。",
+    "tabs": {
+      "api": "API 管理",
+      "agents": "Agent 管理",
+      "mcps": "MCP 配置"
+    },
+    "actions": {
+      "create": "新增客户端",
+      "edit": "编辑",
+      "delete": "删除"
+    },
+    "listTitle": "客户端列表",
+    "columns": {
+      "name": "名称",
+      "provider": "提供商",
+      "model": "模型",
+      "baseUrl": "接口地址",
+      "default": "默认",
+      "enabled": "启用",
+      "actions": "操作"
+    },
+    "dialog": {
+      "title": "创建客户端",
+      "editTitle": "编辑客户端",
+      "subtitle": "填写模型、API 地址以及鉴权信息。",
+      "presets": {
+        "title": "预置提供商",
+        "subtitle": "一键填入常见国内外模型服务。",
+        "placeholder": "选择预置提供商",
+        "apply": "应用预置",
+        "docs": "查看文档",
+        "empty": "暂无预置可用。",
+        "error": "无法加载预置列表。",
+        "regions": {
+          "global": "国际服务",
+          "china": "中国大陆"
+        }
+      },
+      "model": "模型",
+      "modelSelectLabel": "选择模型（共 {{count}} 个）",
+      "modelSelectPlaceholder": "从推荐模型中选择",
+      "modelSelectHint": "也可以下方手动输入自定义模型。",
+      "customModelPlaceholder": "填写模型标识",
+      "customModelHint": "支持输入私有部署或内测版本的模型名称。",
+      "apiKey": "API Key",
+      "defaultLabel": "设为默认",
+      "defaultHint": "默认客户端用于自动 AI 复核。",
+      "enabledLabel": "启用状态",
+      "enabledHint": "可暂时禁用而无需删除。",
+      "errors": {
+        "required": "名称、提供商、地址、模型不能为空。"
+      },
+      "submit": "保存客户端"
+    },
+    "error": "AI 客户端数据加载失败。",
+    "empty": "尚未配置 AI 客户端。"
+  },
+  "aiAgents": {
+    "listTitle": "已配置的 Agent",
+    "actions": {
+      "create": "新增 Agent",
+      "upload": "上传 Agent 插件"
+    },
+    "columns": {
+      "name": "名称",
+      "kind": "类型",
+      "stageTypes": "适用阶段",
+      "mcp": "关联 MCP",
+      "enabled": "启用",
+      "actions": "操作"
+    },
+    "dialog": {
+      "title": "创建 Agent",
+      "editTitle": "编辑 Agent",
+      "subtitle": "定义 Agent 的运行方式及所依赖的 MCP。",
+      "entrypoint": "自定义入口",
+      "stageTypes": "阶段类型（逗号分隔）",
+      "params": "Agent 参数（JSON）",
+      "errors": {
+        "required": "名称和类型不能为空。",
+        "params": "参数必须是合法的 JSON。"
+      }
+    },
+    "error": "AI Agent 数据加载失败。",
+    "empty": "尚未配置 Agent。",
+    "uploadDialog": {
+      "title": "上传 Agent 插件",
+      "subtitle": "上传包含 Agent 实现的 ZIP/TAR 压缩包。",
+      "file": "压缩包文件",
+      "paramsHint": "可选 JSON，例如 {\"timeout\":30}",
+      "enabledHint": "可暂时停用该 Agent 但保留配置。",
+      "submit": "上传 Agent",
+      "errors": {
+        "file": "请选择需要上传的 Agent 压缩包。",
+        "params": "参数必须是合法的 JSON。"
+      }
+    }
+  },
+  "aiMcps": {
+    "listTitle": "已配置的 MCP",
+    "actions": {
+      "create": "新增 MCP",
+      "upload": "上传 MCP 包"
+    },
+    "columns": {
+      "name": "名称",
+      "type": "类型",
+      "endpoint": "Endpoint",
+      "entrypoint": "入口",
+      "enabled": "启用",
+      "actions": "操作"
+    },
+    "dialog": {
+      "title": "创建 MCP",
+      "editTitle": "编辑 MCP",
+      "subtitle": "配置 Agent 与 MCP 的通信方式。",
+      "entrypoint": "入口（可选）",
+      "params": "连接参数（JSON）",
+      "enabledLabel": "启用状态",
+      "enabledHint": "关闭后将保留配置但不会提供服务。",
+      "errors": {
+        "required": "名称和类型不能为空。",
+        "params": "参数必须是合法的 JSON。"
+      }
+    },
+    "uploadDialog": {
+      "title": "上传本地 MCP 包",
+      "subtitle": "上传包含 MCP 实现的 ZIP/TAR 压缩包。",
+      "file": "压缩包文件",
+      "paramsHint": "可选 JSON，例如 {\"timeout\":30}",
+      "submit": "上传 MCP",
+      "errors": {
+        "file": "请选择需要上传的压缩包文件。",
+        "params": "参数必须是合法的 JSON。"
+      }
+    },
+    "error": "MCP 数据加载失败。",
+    "empty": "尚未配置 MCP。"
+  },
+  "aiKnowledge": {
+    "title": "AI 知识库",
+    "subtitle": "维护内部 Runbook / FAQ，供 RAG Agent 查询。",
+    "listTitle": "知识条目",
+    "actions": {
+      "create": "新增条目"
+    },
+    "columns": {
+      "title": "标题",
+      "tags": "标签",
+      "source": "来源链接",
+      "updated": "更新时间",
+      "actions": "操作"
+    },
+    "dialog": {
+      "title": "创建知识条目",
+      "editTitle": "编辑知识条目",
+      "subtitle": "录入可被 Agent 检索的内部指引、处理步骤等内容。",
+      "tagsLabel": "标签",
+      "tagsHint": "逗号分隔，例如 runbook, component:auth",
+      "sourceLabel": "引用链接",
+      "bodyLabel": "正文内容",
+      "errors": {
+        "required": "标题和正文不能为空。"
+      },
+      "submit": "保存条目"
+    },
+    "search": {
+      "title": "知识库搜索",
+      "queryLabel": "问题 / 关键字",
+      "tagsLabel": "标签过滤",
+      "limitLabel": "返回条数",
+      "placeholder": "描述你希望 Agent 解决的问题",
+      "tagsPlaceholder": "tag-one,tag-two",
+      "submit": "搜索",
+      "results": "搜索结果",
+      "score": "相关度：{{score}}",
+      "empty": "暂无搜索结果，请新增条目或调整关键字。"
+    },
+    "empty": "尚未添加任何知识条目。",
+    "error": "知识库数据加载失败。"
+  },
+  "tasks": {
+    "title": "任务探查",
+    "subtitle": "查看任务编排、源码、阶段、产物和发现。",
+    "input": {
+      "label": "任务 ID（UUID）",
+      "placeholder": "11111111-2222-3333-4444-555555555555",
+      "button": "加载任务"
+    },
+    "filters": {
+      "searchPlaceholder": "按任务名称 / 任务 ID / 引用 / 提交搜索"
+    },
+    "actions": {
+      "create": "新建任务",
+      "assignExecutor": "分配执行机",
+      "reassignExecutor": "重新分配执行机",
+      "delete": "删除任务",
+      "confirmDelete": "确认删除任务“{{task}}”？运行中的流程会被终止，任务将被隐藏。"
+    },
+    "createDialog": {
+      "title": "创建任务",
+      "subtitle": "选择项目、任务类型和扫描源来发起扫描。",
+      "project": "所属项目",
+      "repository": "代码仓库",
+      "type": "任务类型",
+      "engine": "引擎",
+      "executorSelect": "优先执行机",
+      "executorPlaceholder": "留空则暂不分配",
+      "semgrepPro": {
+        "label": "启用 Semgrep Pro",
+        "description": "需要有效的 Semgrep App Token（默认 24 小时失效）。",
+        "token": "Semgrep Token"
+      },
+      "aiReview": {
+        "label": "启用 AI 复核",
+        "description": "启用后会在结果审核阶段对待处理漏洞触发 AI 复核。",
+        "mode": "普通精度（无数据流）",
+        "dataFlowMode": "有数据流精度",
+        "modes": {
+          "simple": "简略",
+          "precise": "精确"
+        }
+      },
+      "scaAiReview": {
+        "label": "启用 SCA AI 复核",
+        "description": "启用后会在结果审核阶段对指定风险等级的 SCA 缺陷触发 AI 复核。"
+      },
+      "name": "任务名称",
+      "correlation": "关联 ID",
+      "owner": "负责人（可选）",
+      "gitSection": "仓库快照",
+      "gitSummary": "默认分支：{{branch}} · 最新提交：{{commit}}",
+      "gitEmpty": "暂无仓库快照。",
+      "gitRefresh": "刷新仓库信息",
+      "refMode": "引用模式",
+      "refLatest": "默认分支最新提交",
+      "refBranch": "指定分支",
+      "refTag": "指定标签",
+      "refCommit": "指定提交",
+      "branch": "分支",
+      "tag": "标签",
+      "commit": "提交",
+      "submit": "创建任务",
+      "errors": {
+        "project": "请选择项目。",
+        "repository": "请选择仓库。",
+        "name": "任务名称不能为空。",
+        "correlation": "关联 ID 不能为空。",
+        "branch": "请选择分支。",
+        "tag": "请选择标签。",
+        "commit": "请选择提交。",
+        "noDefaultBranch": "仓库尚未检测到默认分支。",
+        "gitUnknown": "未知的引用模式。",
+        "semgrepToken": "启用 Pro 时必须填写 Semgrep Token。",
+        "aiReviewMode": "请选择 AI 复核精度。",
+        "scaAiReviewSeverities": "请至少选择一个需要复核的风险等级。"
+      }
+    },
+    "assignDialog": {
+      "title": "分配执行机",
+      "subtitle": "请选择一台执行机来运行该任务。",
+      "taskLabel": "任务 ID",
+      "executor": "执行机",
+      "submit": "确认分配",
+      "noTask": "尚未选择任务。",
+      "errors": {
+        "executor": "请选择执行机。"
+      }
+    },
+    "details": {
+      "status": "状态",
+      "type": "类型",
+      "project": "项目",
+      "name": "任务名称",
+      "correlation": "关联 ID",
+      "owner": "负责人",
+      "executor": "执行机",
+      "executorUnassigned": "未分配",
+      "sourceRefType": "源码引用类型",
+      "sourceRef": "源码引用",
+      "commitSha": "提交哈希",
+      "semgrepPro": "Semgrep Pro",
+      "createdAt": "创建时间",
+      "updatedAt": "更新时间"
+    },
+    "logs": {
+      "stageTitle": "阶段日志",
+      "stageSubtitle": "{{type}} · {{status}}",
+      "selectStage": "请选择一个阶段查看日志。",
+      "error": "日志加载失败。",
+      "empty": "该阶段暂无日志。",
+      "streamError": "日志流中断，稍后自动重试。"
+    },
+    "spec": {
+      "title": "任务规格",
+      "source": {
+        "title": "源码来源",
+        "gitRepo": "仓库",
+        "gitRef": "引用",
+        "gitAuth": "鉴权",
+        "archiveKey": "归档 Key",
+        "archiveUrl": "归档 URL",
+        "url": "下载链接",
+        "baseline": "基线指纹"
+      },
+      "ruleSelector": {
+        "title": "规则选择",
+        "mode": "模式",
+        "profile": "Profile",
+        "explicit": "显式规则"
+      },
+      "policy": {
+        "title": "策略",
+        "failOn": "失败阈值",
+        "scanMode": "扫描模式",
+        "parallelism": "并发度",
+        "failStrategy": "失败策略"
+      },
+      "ticket": {
+        "title": "工单自动化",
+        "project": "工单项目",
+        "assignee": "指派策略",
+        "sla": "SLA（天）",
+        "labels": "标签"
+      }
+    },
+    "stages": {
+      "title": "阶段列表",
+      "empty": "暂无阶段。",
+      "columns": {
+        "id": "阶段 ID",
+        "type": "类型",
+        "status": "状态",
+        "artifacts": "产物数",
+        "started": "开始时间",
+        "ended": "结束时间",
+        "logs": "日志",
+        "actions": "操作"
+      },
+      "error": "阶段数据加载失败。",
+      "actions": {
+        "viewLogs": "查看日志",
+        "runResultReview": "运行审核",
+        "rerunResultReview": "重新审核"
+      },
+      "resultReviewDialog": {
+        "title": "运行结果审核",
+        "subtitle": "请选择是否启用 AI 复核以及精度。",
+        "stageId": "阶段 ID",
+        "submit": "开始运行",
+        "aiReview": {
+          "label": "启用 AI 复核",
+          "description": "启用后会对待处理漏洞排队触发 AI 复核。",
+          "mode": "普通精度（无数据流）",
+          "dataFlowMode": "有数据流精度"
+        }
+      }
+    },
+    "artifacts": {
+      "title": "产物",
+      "empty": "暂无产物。",
+      "columns": {
+        "id": "产物 ID",
+        "stage": "所属阶段",
+        "uri": "地址",
+        "kind": "类型",
+        "size": "大小",
+        "checksum": "校验值"
+      },
+      "error": "产物数据加载失败。"
+    },
+    "findings": {
+      "title": "发现",
+      "empty": "暂无发现。",
+      "columns": {
+        "severity": "严重级别",
+        "rule": "规则 ID",
+        "status": "状态",
+        "introducedBy": "引入者"
+      },
+      "error": "漏洞数据加载失败。"
+    },
+    "errors": {
+      "task": "无法加载任务，请确认 ID 是否正确且拥有权限。"
+    },
+    "listError": "任务列表加载失败。",
+    "listEmpty": "当前筛选条件下暂无任务。"
+  },
+  "rules": {
+    "title": "规则管理",
+    "subtitle": "查看租户下登记的静态扫描规则。",
+    "actions": {
+      "create": "新增规则"
+    },
+    "columns": {
+      "name": "名称",
+      "engine": "引擎",
+      "severity": "严重级别",
+      "scope": "作用域",
+      "langs": "语言",
+      "tags": "标签",
+      "enabled": "启用"
+    },
+    "empty": "暂无规则。",
+    "error": "规则列表加载失败。",
+    "form": {
+      "title": "创建规则",
+      "subtitle": "填写规则元数据及 Pattern/DOCS JSON。",
+      "scope": "作用域",
+      "key": "规则键",
+      "name": "名称",
+      "engine": "引擎",
+      "langs": "语言（逗号分隔）",
+      "severity": "严重级别",
+      "tags": "标签（逗号分隔）",
+      "pattern": "Pattern JSON",
+      "docs": "Docs JSON（可选）",
+      "enabled": "是否启用",
+      "hash": "规则哈希",
+      "signature": "签名（可选）",
+      "submit": "创建规则",
+      "invalidJson": "JSON 内容解析失败",
+      "serverError": "创建失败：{{message}}",
+      "success": "规则已创建。"
+    }
+  },
+  "repositories": {
+    "title": "代码仓库",
+    "subtitle": "为项目登记远程仓库或本地上传包。",
+    "empty": "暂无仓库。",
+    "columns": {
+      "sourceMode": "来源模式",
+      "remoteUrl": "远端地址",
+      "scmType": "SCM 类型",
+      "defaultBranch": "默认分支",
+      "secretRef": "密钥引用",
+      "authMode": "鉴权"
+    },
+    "scmLabels": {
+      "github": "GitHub",
+      "gitlab": "GitLab",
+      "gerrit": "Gerrit",
+      "bitbucket": "Bitbucket",
+      "git": "通用 Git"
+    },
+    "form": {
+      "title": "仓库配置",
+      "sourceMode": "来源模式",
+      "remoteUrl": "远端地址",
+      "scmType": "SCM 类型",
+      "defaultBranch": "默认分支",
+      "secretRef": "凭据引用",
+      "remoteSection": "远程 Git 配置",
+      "remoteHint": "来源模式为 REMOTE 或 MIXED 时必填。",
+      "uploadSection": "本地上传包元数据",
+      "uploadHint": "来源模式为 UPLOAD 或 MIXED 时必填。",
+      "uploadKey": "归档对象 Key（存储路径）",
+      "uploadChecksum": "校验值（SHA-256）",
+      "uploadSize": "归档大小（字节）",
+      "selectArchive": "选择压缩包",
+      "fileSelected": "已选择 {{name}}（{{size}}）",
+      "digesting": "计算中...",
+      "uploadHelper": "对象存储上传 API 尚未开放，请先自行上传并填写 Key。选择本地文件仅用于本地计算校验值与大小。",
+      "authSection": "仓库鉴权",
+      "authHint": "在这里预置访问凭据，执行前会自动用于克隆仓库。",
+      "authMode": "鉴权方式",
+      "authModes": {
+        "none": "无需鉴权",
+        "basic": "账号密码",
+        "token": "访问令牌"
+      },
+      "authUsername": "账号",
+      "authPassword": "密码",
+      "authToken": "访问令牌",
+      "authTokenUser": "令牌用户名（可选）",
+      "authTokenUserPlaceholder": "git",
+      "authStored": "该仓库已保存加密凭据，如需更新请重新录入。",
+      "authReplace": "更新凭据",
+      "authErrors": {
+        "basic": "账号和密码不能为空。",
+        "token": "请填写访问令牌。"
+      },
+      "save": "保存",
+      "editing": "正在编辑仓库 {{name}}"
+    },
+    "errors": {
+      "cryptoUnavailable": "浏览器不支持 Web Crypto API，请手动填写校验值。"
+    },
+    "actions": {
+      "add": "新增仓库",
+      "viewList": "返回列表",
+      "back": "返回列表",
+      "edit": "编辑",
+      "delete": "删除",
+      "update": "更新仓库"
+    },
+    "confirmDelete": "确认删除仓库 {{name}} 吗？可随时重新登记。"
+  },
+  "findings": {
+    "title": "漏洞管理",
+    "subtitle": "统一查看并处理各任务产生的漏洞发现。",
+    "taskList": "任务列表",
+    "projectList": "项目列表",
+    "repoList": "代码仓库列表",
+    "scope": {
+      "label": "查看维度",
+      "task": "按任务",
+      "project": "按项目",
+      "repo": "按代码仓库"
+    },
+    "panelTitle": "{{task}} 的漏洞列表",
+    "panelTitleProject": "{{project}} 的漏洞列表",
+    "panelTitleRepo": "{{repo}} 的漏洞列表",
+    "noneSelected": "请选择左侧任务。",
+    "noneSelectedProject": "请选择一个项目。",
+    "noneSelectedRepo": "请选择一个代码仓库。",
+    "selectTaskHint": "从左侧任务列表中选择一个任务以查看漏洞详情。",
+    "selectProjectHint": "从左侧项目列表中选择一个项目以查看漏洞详情。",
+    "selectRepoHint": "从左侧代码仓库列表中选择一个仓库以查看漏洞详情。",
+    "filters": {
+      "searchPlaceholder": "按规则 ID 或引擎搜索"
+    },
+    "detailBadge": "CODE",
+    "labels": {
+      "task": "任务",
+      "project": "项目",
+      "repository": "代码仓库",
+      "createdAt": "创建时间"
+    },
+    "columns": {
+      "severity": "严重级别",
+      "rule": "规则 ID",
+      "status": "状态",
+      "dataflow": "数据流",
+      "introducedBy": "引擎",
+      "actions": "操作",
+      "location": "问题位置"
+    },
+    "actions": {
+      "details": "详情",
+      "aiReview": "AI 复核",
+      "reviewing": "复核中...",
+      "delete": "删除",
+      "confirmDelete": "确认删除该漏洞记录？此操作仅会隐藏该条结果。"
+    },
+    "detailTitle": "漏洞 {{id}}",
+    "detailSubtitle": "标准化定位数据",
+    "error": "漏洞数据加载失败。",
+    "empty": "当前筛选条件下暂无漏洞。",
+    "detailSection": {
+      "related": "项目内其他漏洞",
+      "aiReviewOpinion": "AI 审核意见",
+      "code": "代码片段",
+      "dataflow": "数据流",
+      "meta": "详情信息",
+      "noCode": "未获取到代码片段",
+      "noDataflow": "未包含数据流信息",
+      "dataflowNodesOnly": "仅提供节点列表，未包含边信息"
+    },
+    "dataflow": {
+      "clickNodeHint": "点击节点查看对应代码片段",
+      "snippetTitle": "节点代码片段",
+      "selectNode": "请选择包含文件与行号的节点查看代码",
+      "path": "链路",
+      "nodes": "节点",
+      "selected": "已选择",
+      "flowTo": "流向",
+      "toNext": "到下一步",
+      "expand": "展开",
+      "collapse": "收起",
+      "location": "位置",
+      "roles": {
+        "SOURCE": "源点",
+        "PROPAGATOR": "传播点",
+        "SINK": "汇点",
+        "UNKNOWN": "未知"
+      },
+      "summary": {
+        "start": "污点从 {{value}} 开始",
+        "propagate": "传递到 {{value}}",
+        "end": "最终流向 {{value}}",
+        "separator": "，",
+        "punct": "。"
+      }
+    },
+    "exportReport": "导出报告",
+    "exportTitle": "报告标题",
+    "exportTitlePlaceholder": "例如：Secrux 安全报告",
+    "exportFormat": "导出格式",
+    "exportDetail": "详情程度",
+    "exportSummary": "简略",
+    "exportFull": "详细",
+    "exportInclude": "包含内容",
+    "exportCode": "代码片段",
+    "exportDataFlow": "数据流",
+    "exportScope": "导出范围",
+    "exportScopeFinding": "仅当前漏洞",
+    "exportScopeTask": "该任务全部漏洞",
+    "exportLanguage": "语言",
+    "exportScopeProject": "该项目全部漏洞",
+    "exportScopeRepo": "该仓库全部漏洞"
+  },
+  "projects": {
+    "title": "项目列表",
+    "subtitle": "展示租户下的代码库与流水线配置",
+    "tableTitle": "已登记项目",
+    "columns": {
+      "name": "名称",
+      "codeOwners": "代码负责人",
+      "createdAt": "创建时间"
+    },
+    "empty": "暂无项目，请通过 API 创建或导入数据。",
+    "error": "无法加载项目数据。",
+    "form": {
+      "createTitle": "创建项目",
+      "editTitle": "编辑项目",
+      "name": "名称",
+      "codeOwners": "代码负责人（逗号分隔）",
+      "save": "保存",
+      "create": "创建"
+    },
+    "actions": {
+      "edit": "编辑",
+      "details": "详情",
+      "cancel": "取消",
+      "delete": "删除"
+    },
+    "detail": {
+      "labels": {
+        "codeOwners": "代码负责人",
+        "createdAt": "创建时间",
+        "updatedAt": "更新时间",
+        "branch": "分支"
+      },
+      "actions": {
+        "viewFindings": "查看漏洞",
+        "viewRepoFindings": "仓库漏洞",
+        "viewSca": "查看 SCA",
+        "openTaskExplorer": "任务探查"
+      },
+      "sections": {
+        "repositories": "代码仓库",
+        "tasks": "最近任务"
+      },
+      "overview": {
+        "repositories": "代码仓库",
+        "tasks": "任务",
+        "findings": "漏洞",
+        "sca": "SCA 缺陷",
+        "total": "总计",
+        "running": "执行中",
+        "open": "待处理",
+        "confirmed": "已确认"
+      },
+      "columns": {
+        "taskName": "任务名称",
+        "taskType": "类型",
+        "taskStatus": "状态",
+        "createdAt": "创建时间"
+      },
+      "tasks": {
+        "pageEmpty": "暂无任务",
+        "pageRange": "显示 {{start}}-{{end}} / 共 {{total}}"
+      },
+      "empty": {
+        "repositories": "该项目下暂无代码仓库。",
+        "tasks": "该项目下暂无任务。"
+      },
+      "errors": {
+        "invalidProject": "缺少项目 ID。",
+        "overview": "无法加载项目概览。",
+        "repositories": "无法加载代码仓库列表。",
+        "tasks": "无法加载任务列表。"
+      }
+    },
+    "confirmDelete": "确认删除项目“{{name}}”吗？历史任务与仓库仍会保留，但该项目将不可见。"
+  },
+  "executors": {
+    "title": "执行机集群",
+    "subtitle": "注册、监控并向执行机下发任务。",
+    "actions": {
+      "register": "注册执行机",
+      "dispatch": "下发任务",
+      "drain": "停止调度",
+      "resume": "恢复调度",
+      "viewToken": "查看令牌"
+    },
+    "filters": {
+      "title": "筛选条件",
+      "search": "名称/ID 搜索",
+      "status": "状态"
+    },
+    "table": {
+      "name": "名称",
+      "status": "状态",
+      "cpu": "CPU",
+      "memory": "内存",
+      "labels": "标签"
+    },
+    "empty": "尚未注册任何执行机。",
+    "status": {
+      "registered": "已登记",
+      "ready": "可用",
+      "busy": "执行中",
+      "draining": "下线中",
+      "offline": "离线"
+    },
+    "dialogs": {
+      "registerTitle": "注册执行机",
+      "dispatchTitle": "下发任务",
+      "dispatchHint": "将容器任务推送至指定执行机。",
+      "tokenTitle": "执行机令牌 · {{name}}",
+      "tokenHint": "请妥善保管，任何持有此令牌的客户端都可接入控制平面。",
+      "tokenCopy": "复制令牌",
+      "tokenCopied": "已复制",
+      "tokenEmpty": "暂时无法获取令牌，请稍后重试。"
+    },
+    "form": {
+      "name": "名称",
+      "cpu": "CPU 容量（核）",
+      "memory": "内存容量（MB）",
+      "labels": "标签（key=value，逗号分隔）",
+      "executor": "执行机",
+      "taskId": "任务 ID",
+      "engine": "引擎",
+      "image": "容器镜像（可选覆盖）",
+      "imageHint": "留空则使用执行机为该引擎预设的镜像。",
+      "command": "执行命令",
+      "env": "环境变量",
+      "cpuLimit": "CPU 限制",
+      "memoryLimit": "内存限制（MB）",
+      "timeout": "超时时间（秒）",
+      "memoryLimitMb": "内存限制（MB）"
+    }
+  },
+  "statuses": {
+    "PENDING": "待启动",
+    "RUNNING": "执行中",
+    "SUCCEEDED": "已完成",
+    "FAILED": "失败",
+    "CANCELED": "已取消",
+    "SKIPPED": "已跳过",
+    "OPEN": "待处理",
+    "CONFIRMED": "已确认",
+    "FALSE_POSITIVE": "误报",
+    "RESOLVED": "已解决",
+    "WONT_FIX": "不修复",
+    "SYNCED": "已同步"
+  },
+  "taskTypes": {
+    "CODE_CHECK": "代码检查",
+    "SCA_CHECK": "SCA 检查",
+    "SECURITY_SCAN": "安全扫描",
+    "SUPPLY_CHAIN": "供应链"
+  },
+  "stageTypes": {
+    "SOURCE_PREPARE": "代码准备",
+    "RULES_PREPARE": "规则准备",
+    "SCAN_EXEC": "扫描执行",
+    "RESULT_PROCESS": "结果处理",
+    "RESULT_REVIEW": "结果审核"
+  },
+  "logLevels": {
+    "INFO": "信息",
+    "WARN": "警告",
+    "ERROR": "错误"
+  },
+  "severities": {
+    "CRITICAL": "严重",
+    "HIGH": "高危",
+    "MEDIUM": "中危",
+    "LOW": "低危",
+    "INFO": "提示"
+  },
+  "sca": {
+    "title": "SCA 管理",
+    "subtitle": "对 SBOM、仓库、镜像或文件系统进行依赖风险扫描。",
+    "actions": {
+      "create": "新建 SCA 任务"
+    },
+    "taskListTitle": "SCA 任务",
+    "emptySelection": "请选择一个 SCA 任务查看详情。",
+    "taskInfo": {
+      "createdAt": "创建时间",
+      "engine": "引擎",
+      "target": "扫描目标",
+      "stages": "阶段"
+    },
+    "dependencyGraph": {
+      "title": "程序依赖图",
+      "empty": "暂无依赖图（任务未完成或未生成）。",
+      "counts": "{{nodes}} 个组件 · {{edges}} 条依赖",
+      "searchPlaceholder": "搜索组件…",
+      "noMatches": "没有匹配的组件。",
+      "deps": "{{count}} 个依赖",
+      "dependents": "{{count}} 个被依赖",
+      "cycle": "循环依赖",
+      "expand": "展开",
+      "collapse": "收起",
+      "directDeps": "直接依赖",
+      "directDependents": "直接被依赖",
+      "selectNode": "选择一个组件查看关系。",
+      "none": "无",
+      "more": "还有 {{count}} 个…"
+    },
+    "sbom": {
+      "title": "SBOM",
+      "show": "展开",
+      "hide": "收起",
+      "download": "下载 SBOM",
+      "downloading": "下载中...",
+      "downloadError": "SBOM 下载失败。",
+      "error": "SBOM 加载失败。",
+      "empty": "暂无 SBOM（任务未完成或未生成）。"
+    },
+    "issues": {
+      "title": "缺陷列表",
+      "error": "缺陷加载失败。",
+      "empty": "暂无缺陷。",
+      "related": "同任务其他缺陷",
+      "batch": {
+        "selected": "已选 {{count}} 条",
+        "confirm": "确认所选",
+        "apply": "更新状态",
+        "aiReview": "AI 审核所选",
+        "stash": "暂存所选到工单",
+        "clear": "清空选择"
+      },
+      "review": {
+        "title": "AI 审核",
+        "trigger": "AI 审核",
+        "jobStatus": "任务状态",
+        "verdict": "结论",
+        "confidence": "置信度",
+        "summary": "摘要",
+        "fixHint": "修复建议",
+        "empty": "暂无审核记录。",
+        "ai": "AI审核",
+        "aiPending": "AI审核中",
+        "human": "人工确认"
+      },
+      "usage": {
+        "title": "使用位置",
+        "snippetTitle": "代码片段",
+        "selectHint": "请选择一条使用位置查看代码片段。",
+        "snippetError": "代码片段加载失败。",
+        "error": "使用位置加载失败。",
+        "empty": "暂无使用位置（未生成或未匹配）。"
+      },
+      "detailError": "缺陷详情加载失败。",
+      "detail": {
+        "badge": "SCA",
+        "info": "详情信息",
+        "cvss": "CVSS",
+        "task": "任务",
+        "project": "项目",
+        "purl": "PURL",
+        "primaryUrl": "参考链接",
+        "introducedBy": "引入来源",
+        "createdAt": "创建时间",
+        "location": "定位信息",
+        "summary": "摘要",
+        "description": "描述",
+        "references": "参考资料",
+        "raw": "原始内容"
+      },
+      "columns": {
+        "vuln": "漏洞",
+        "package": "组件",
+        "severity": "等级",
+        "status": "状态",
+        "review": "复核"
+      }
+    },
+    "createDialog": {
+      "title": "创建 SCA 任务",
+      "subtitle": "选择扫描目标并创建 SCA_CHECK 任务。",
+      "project": "项目",
+      "targetType": "目标类型",
+      "targetTypes": {
+        "git": "仓库",
+        "archive": "上传压缩包（.zip）",
+        "filesystem": "文件系统路径",
+        "image": "Docker 镜像",
+        "sbom": "上传 SBOM"
+      },
+      "repository": "仓库",
+      "refMode": "版本选择",
+      "refModes": {
+        "latest": "默认分支",
+        "branch": "分支",
+        "tag": "Tag",
+        "commit": "Commit"
+      },
+      "refValue": "版本值",
+      "archive": "源码压缩包（.zip）",
+      "sbom": "SBOM 文件（CycloneDX JSON）",
+      "upload": "上传",
+      "filesystemPath": "文件系统路径",
+      "filesystemHint": "扫描服务可访问的路径（本地/执行机）。",
+      "imageRef": "镜像引用",
+      "imageHint": "例如：nginx:latest 或 my-registry/app:1.0",
+      "correlationId": "关联 ID",
+      "executor": "执行机（可选）",
+      "submit": "创建",
+      "errors": {
+        "project": "项目不能为空。",
+        "repository": "仓库不能为空。",
+        "correlation": "关联 ID 不能为空。",
+        "noDefaultBranch": "无法获取仓库默认分支。",
+        "branch": "分支不能为空。",
+        "tag": "Tag 不能为空。",
+        "commit": "Commit sha 不能为空。",
+        "gitUnknown": "无法识别版本选择。",
+        "archiveUpload": "请先上传压缩包。",
+        "sbomUpload": "请先上传 SBOM。",
+        "filesystemPath": "文件系统路径不能为空。",
+        "imageRef": "镜像引用不能为空。"
+      }
+    }
+  },
+  "common": {
+    "loading": "加载中...",
+    "logout": "退出登录",
+    "cancel": "取消",
+    "save": "保存",
+    "saving": "保存中...",
+    "edit": "编辑",
+    "delete": "删除",
+    "search": "搜索",
+    "all": "全部",
+    "actions": "操作",
+    "enabled": "已启用",
+    "disabled": "已关闭",
+    "selectPlaceholder": "请选择",
+    "yes": "是",
+    "no": "否",
+    "refresh": "刷新",
+    "previous": "上一页",
+    "next": "下一页",
+    "pageStatus": "第 {{page}} / {{total}} 页",
+    "error": "请求失败，请稍后再试。",
+    "notAvailable": "暂无",
+    "updatedAt": "更新时间",
+    "back": "返回"
+  }
+}

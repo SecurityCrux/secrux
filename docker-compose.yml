@@ -1,0 +1,16 @@
+services:
+  secrux-console:
+    build:
+      context: .
+    restart: unless-stopped
+    ports:
+      - "${CONSOLE_PORT:-5173}:80"
+    environment:
+      SECRUX_API_BASE_URL: ${SECRUX_API_BASE_URL:-http://localhost:8080}
+      SECRUX_AUTH_MODE: ${SECRUX_AUTH_MODE:-keycloak}
+      SECRUX_OIDC_BASE_URL: ${SECRUX_OIDC_BASE_URL:-http://localhost:8081}
+      SECRUX_OIDC_REALM: ${SECRUX_OIDC_REALM:-secrux}
+      SECRUX_OIDC_CLIENT_ID: ${SECRUX_OIDC_CLIENT_ID:-secrux-console}
+      SECRUX_OIDC_SCOPE: ${SECRUX_OIDC_SCOPE:-openid}
+      SECRUX_APP_VERSION: ${SECRUX_APP_VERSION:-dev}
+
