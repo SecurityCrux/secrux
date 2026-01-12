@@ -5,6 +5,9 @@ FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 
 ARG GRADLE_MAX_WORKERS=2
+# Work around restricted seccomp/LXC environments where the JDK NIO socket impl
+# may fail with `UnixDispatcher.init: Permission denied` during network access.
+ENV JAVA_TOOL_OPTIONS="-Djdk.net.usePlainSocketImpl=true"
 
 COPY gradle /app/gradle
 COPY gradlew build.gradle.kts settings.gradle.kts /app/
