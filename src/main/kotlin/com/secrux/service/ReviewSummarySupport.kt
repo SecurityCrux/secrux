@@ -67,3 +67,20 @@ internal fun extractOpinionI18n(payload: Map<String, Any?>?): FindingReviewOpini
     return null
 }
 
+internal fun buildAiReviewFailurePayload(error: String?): Map<String, Any?> =
+    mapOf(
+        "opinionI18n" to
+            mapOf(
+                "zh" to
+                    mapOf(
+                        "summary" to "AI 复核失败",
+                        "fixHint" to "请检查 AI Client 配置（baseUrl/model/apiKey）以及 AI 服务日志。"
+                    ),
+                "en" to
+                    mapOf(
+                        "summary" to "AI review failed",
+                        "fixHint" to "Check AI client baseUrl/model/apiKey and AI service logs."
+                    )
+            ),
+        "error" to error?.take(2000)
+    )

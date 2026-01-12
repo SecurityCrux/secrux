@@ -88,13 +88,57 @@ class FindingReviewService(
 
     fun applyAiReviewIfReady(tenantId: UUID, ticket: AiJobTicket): FindingStatus? {
         if (ticket.jobType != AiJobType.FINDING_REVIEW) return null
-        if (ticket.status != AiJobStatus.COMPLETED) return null
-        val findingId = runCatching { UUID.fromString(ticket.targetId) }.getOrNull() ?: return null
-
         val existing = aiReviewRepository.findByJobId(tenantId, ticket.jobId)
         if (existing?.appliedAt != null) {
             return existing.statusAfter
         }
+
+        if (ticket.status == AiJobStatus.FAILED) {
+            val now = OffsetDateTime.now(clock)
+            val updatedRows = aiReviewRepository.updateByJobId(
+                tenantId = tenantId,
+                jobId = ticket.jobId,
+                verdict = "FAILED",
+                reason = ticket.error,
+                confidence = null,
+                statusBefore = existing?.statusBefore,
+                statusAfter = null,
+                payload = buildAiReviewFailurePayload(ticket.error),
+                appliedAt = now,
+                updatedAt = now
+            )
+            if (updatedRows == 0) {
+                val findingId = runCatching { UUID.fromString(ticket.targetId) }.getOrNull()
+                val finding = findingId?.let { findingRepository.findById(it, tenantId) }
+                if (finding == null) {
+                    return null
+                }
+                val record = AiReviewRecord(
+                    reviewId = UUID.randomUUID(),
+                    tenantId = tenantId,
+                    findingId = finding.findingId,
+                    reviewType = REVIEW_TYPE_AI,
+                    reviewer = "AI",
+                    reviewerUserId = null,
+                    jobId = ticket.jobId,
+                    verdict = "FAILED",
+                    reason = ticket.error,
+                    confidence = null,
+                    statusBefore = finding.status,
+                    statusAfter = null,
+                    payload = buildAiReviewFailurePayload(ticket.error),
+                    createdAt = now,
+                    appliedAt = now,
+                    updatedAt = now,
+                )
+                aiReviewRepository.insert(record)
+                return finding.status
+            }
+            return existing?.statusBefore
+        }
+
+        if (ticket.status != AiJobStatus.COMPLETED) return null
+        val findingId = runCatching { UUID.fromString(ticket.targetId) }.getOrNull() ?: return null
 
         val finding = findingRepository.findById(findingId, tenantId) ?: return null
         val parsed = parseAiReviewResult(ticket)

@@ -91,13 +91,59 @@ class ScaIssueReviewService(
 
     fun applyAiReviewIfReady(tenantId: UUID, ticket: AiJobTicket): FindingStatus? {
         if (ticket.jobType != AiJobType.SCA_ISSUE_REVIEW) return null
-        if (ticket.status != AiJobStatus.COMPLETED) return null
-        val issueId = runCatching { UUID.fromString(ticket.targetId) }.getOrNull() ?: return null
-
         val existing = scaIssueReviewRepository.findByJobId(tenantId, ticket.jobId)
         if (existing?.appliedAt != null) {
             return existing.statusAfter
         }
+
+        if (ticket.status == AiJobStatus.FAILED) {
+            val now = OffsetDateTime.now(clock)
+            val updatedRows =
+                scaIssueReviewRepository.updateByJobId(
+                    tenantId = tenantId,
+                    jobId = ticket.jobId,
+                    verdict = "FAILED",
+                    reason = ticket.error,
+                    confidence = null,
+                    statusBefore = existing?.statusBefore,
+                    statusAfter = null,
+                    payload = buildAiReviewFailurePayload(ticket.error),
+                    appliedAt = now,
+                    updatedAt = now
+                )
+            if (updatedRows == 0) {
+                val issueId = runCatching { UUID.fromString(ticket.targetId) }.getOrNull()
+                val issue = issueId?.let { scaIssueRepository.findById(tenantId, it) }
+                if (issue == null) {
+                    return null
+                }
+                val record =
+                    ScaIssueReviewRecord(
+                        reviewId = UUID.randomUUID(),
+                        tenantId = tenantId,
+                        issueId = issue.issueId,
+                        reviewType = REVIEW_TYPE_AI,
+                        reviewer = "AI",
+                        reviewerUserId = null,
+                        jobId = ticket.jobId,
+                        verdict = "FAILED",
+                        reason = ticket.error,
+                        confidence = null,
+                        statusBefore = issue.status,
+                        statusAfter = null,
+                        payload = buildAiReviewFailurePayload(ticket.error),
+                        createdAt = now,
+                        appliedAt = now,
+                        updatedAt = now,
+                    )
+                scaIssueReviewRepository.insert(record)
+                return issue.status
+            }
+            return existing?.statusBefore
+        }
+
+        if (ticket.status != AiJobStatus.COMPLETED) return null
+        val issueId = runCatching { UUID.fromString(ticket.targetId) }.getOrNull() ?: return null
 
         val issue = scaIssueRepository.findById(tenantId, issueId) ?: return null
         val parsed = parseAiReviewResult(ticket)
@@ -163,4 +209,3 @@ private fun ScaIssueReviewRecord.toSummary(): FindingReviewSummary =
         createdAt = createdAt,
         appliedAt = appliedAt
     )
-
