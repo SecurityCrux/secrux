@@ -236,7 +236,7 @@ services:
     volumes:
       - ./deploy/reverse-proxy/nginx.conf:/etc/nginx/conf.d/default.conf.template:ro
       - ./deploy/reverse-proxy/entrypoint.sh:/entrypoint.sh:ro
-    entrypoint: ["/entrypoint.sh"]
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
     command: ["nginx", "-g", "daemon off;"]
     depends_on:
       - secrux-console
