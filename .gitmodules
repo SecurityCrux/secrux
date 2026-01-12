@@ -13,3 +13,6 @@
 [submodule "secrux-executor"]
 	path = secrux-executor
 	url = git@github.com:SecurityCrux/secrux-executor.git
+[submodule "secrux-intellij-plugin"]
+	path = secrux-intellij-plugin
+	url = git@github.com:SecurityCrux/secrux-intellij-plugin.git
