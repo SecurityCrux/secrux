@@ -63,10 +63,12 @@ docker compose up -d --force-recreate secrux-server
 
 3. Open:
 
-- Console: `http://localhost:5173`
+- Console: `http://localhost:5173` (served via Nginx reverse proxy; browser calls use same-origin `/api/*` and `/auth/*` to avoid CORS)
 - API: `http://localhost:8080` (Docs: `http://localhost:8080/doc.html`)
 - Keycloak: `http://localhost:8081`
 - AI service health: `http://localhost:5156/health`
+
+Tip (server deploy): set `CONSOLE_PORT=80` in `.env` and open `http://<host>/`.
 
 4. (Optional) Run an executor on the same machine:
 

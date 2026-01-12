@@ -63,10 +63,12 @@ docker compose up -d --force-recreate secrux-server
 
 3. 访问地址：
 
-- 控制台：`http://localhost:5173`
+- 控制台：`http://localhost:5173`（通过 Nginx 反向代理统一到同一 Origin；浏览器侧使用同源的 `/api/*`、`/auth/*`，避免 CORS）
 - API：`http://localhost:8080`（接口文档：`http://localhost:8080/doc.html`）
 - Keycloak：`http://localhost:8081`
 - AI 健康检查：`http://localhost:5156/health`
+
+提示（服务器部署）：在 `.env` 中设置 `CONSOLE_PORT=80`，然后访问 `http://<host>/`。
 
 4.（可选）在同一台机器启动一个执行机：
 

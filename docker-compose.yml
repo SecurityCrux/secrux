@@ -203,18 +203,33 @@ services:
     build:
       context: ./secrux-web
     restart: unless-stopped
-    ports:
-      - "${CONSOLE_PORT:-5173}:80"
     environment:
-      SECRUX_API_BASE_URL: ${SECRUX_API_BASE_URL:-http://localhost:8080}
+      # Use same-origin paths behind `secrux-proxy` to avoid browser CORS.
+      SECRUX_API_BASE_URL: ${SECRUX_API_BASE_URL:-/api}
       SECRUX_AUTH_MODE_UI: ${SECRUX_AUTH_MODE_UI:-keycloak}
-      SECRUX_OIDC_BASE_URL: ${SECRUX_OIDC_BASE_URL:-http://localhost:8081}
+      SECRUX_OIDC_BASE_URL: ${SECRUX_OIDC_BASE_URL:-/auth}
       SECRUX_OIDC_REALM: ${SECRUX_OIDC_REALM:-secrux}
       SECRUX_OIDC_CLIENT_ID: ${SECRUX_OIDC_CLIENT_ID:-secrux-console}
       SECRUX_OIDC_SCOPE: ${SECRUX_OIDC_SCOPE:-openid}
       SECRUX_APP_VERSION: ${SECRUX_APP_VERSION:-dev}
     depends_on:
       - secrux-server
+
+  # Single entrypoint to avoid CORS in browsers:
+  # - `/`      -> console (static)
+  # - `/api/*` -> secrux-server
+  # - `/auth/*`-> keycloak
+  secrux-proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${CONSOLE_PORT:-5173}:80"
+    volumes:
+      - ./deploy/reverse-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - secrux-console
+      - secrux-server
+      - keycloak
 
 volumes:
   postgres_data:
