@@ -1,0 +1,68 @@
+<idea-plugin>
+    <id>com.securitycrux.secrux.intellij</id>
+    <name>Secrux Audit Assistant</name>
+    <vendor>SecurityCrux</vendor>
+
+    <description>
+        IntelliJ plugin for Secrux code audit workflows (UAST/PSI based).
+    </description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
+    <depends>org.jetbrains.kotlin</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="Secrux" displayType="BALLOON" isLogByDefault="true"/>
+        <toolWindow
+                id="Secrux"
+                anchor="left"
+                icon="/icons/secrux.svg"
+                factoryClass="com.securitycrux.secrux.intellij.toolwindow.SecruxToolWindowFactory"/>
+        <toolWindow
+                id="Secrux Results"
+                anchor="bottom"
+                icon="/icons/secrux.svg"
+                factoryClass="com.securitycrux.secrux.intellij.toolwindow.SecruxResultsToolWindowFactory"/>
+    </extensions>
+
+    <extensions defaultExtensionNs="org.jetbrains.kotlin">
+        <supportsKotlinPluginMode supportsK1="true" supportsK2="true"/>
+    </extensions>
+
+    <actions>
+        <group
+                id="Secrux.Actions"
+                class="com.securitycrux.secrux.intellij.actions.SecruxActionGroup"
+                popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+
+            <action
+                    id="Secrux.OpenToolWindow"
+                    class="com.securitycrux.secrux.intellij.actions.OpenSecruxToolWindowAction"/>
+            <action
+                    id="Secrux.OpenResultsToolWindow"
+                    class="com.securitycrux.secrux.intellij.actions.OpenSecruxResultsToolWindowAction"/>
+            <separator/>
+            <action
+                    id="Secrux.ScanSinks"
+                    class="com.securitycrux.secrux.intellij.actions.ScanSinksAction"/>
+            <action
+                    id="Secrux.ClearHighlights"
+                    class="com.securitycrux.secrux.intellij.actions.ClearHighlightsAction"/>
+            <action
+                    id="Secrux.BuildCallGraph"
+                    class="com.securitycrux.secrux.intellij.actions.BuildCallGraphAction"/>
+            <action
+                    id="Secrux.ReloadCallGraph"
+                    class="com.securitycrux.secrux.intellij.actions.ReloadCallGraphAction"/>
+            <action
+                    id="Secrux.ClearCallGraphCache"
+                    class="com.securitycrux.secrux.intellij.actions.ClearCallGraphCacheAction"/>
+            <separator/>
+            <action
+                    id="Secrux.AddToAuditMemo"
+                    class="com.securitycrux.secrux.intellij.actions.AddToAuditMemoAction"/>
+        </group>
+    </actions>
+</idea-plugin>
