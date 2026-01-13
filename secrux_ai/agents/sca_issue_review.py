@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -172,9 +173,12 @@ class ScaIssueReviewAgent(BaseAgent):
             return None
 
         url = base_url.rstrip("/")
-        if not url.endswith("/v1"):
-            url = f"{url}/v1"
-        url = f"{url}/chat/completions"
+        if re.search(r"/chat/completions[^/]*$", url):
+            pass
+        elif re.search(r"/v\\d+$", url):
+            url = f"{url}/chat/completions"
+        else:
+            url = f"{url}/v1/chat/completions"
 
         temperature = 0.2
         system = (

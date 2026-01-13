@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -104,8 +105,14 @@ class VulnReviewAgent(BaseAgent):
             "location": location,
             "snippet": code_text,
             "opinionI18n": {
-                "zh": {"summary": f"快速 AI 复核：规则 {rule_id or 'N/A'}", "fixHint": None},
-                "en": {"summary": summary, "fixHint": None},
+                "zh": {
+                    "summary": f"快速 AI 复核：规则 {rule_id or 'N/A'}",
+                    "fixHint": "未调用外部 LLM（可能是 AI Client 未启用/缺少 baseUrl/apiKey/model，或调用失败）。请检查平台 AI 客户端配置以及 ai-service 日志。",
+                },
+                "en": {
+                    "summary": summary,
+                    "fixHint": "External LLM not invoked (missing/disabled baseUrl/apiKey/model, or call failed). Check AI client config and ai-service logs.",
+                },
             },
         }
         return AgentFinding(
@@ -120,7 +127,8 @@ class VulnReviewAgent(BaseAgent):
         dataflow = finding.get("dataflow") or finding.get("dataFlow") or {}
         nodes = dataflow.get("nodes") or []
         edges = dataflow.get("edges") or []
-        call_chain = self._format_call_chain(nodes, edges)
+        call_chains = self._resolve_call_chains(finding, nodes, edges)
+        call_chain_lines = self._format_call_chains(call_chains)
         snippet = finding.get("codeSnippet") or {}
         location = finding.get("location") or {}
         rule_id = finding.get("ruleId") or finding.get("rule_id")
@@ -139,8 +147,8 @@ class VulnReviewAgent(BaseAgent):
             f"[Rule] {rule_id or 'N/A'} | Severity {severity.value}",
             f"[Location] {location.get('path','unknown')}:{location.get('line') or location.get('startLine') or ''}",
             "[Task] Decide true positive vs false positive, and give fix hint. Use the call chain if present.",
-            "[Call chain]",
-            "\n".join(call_chain) or "<no call chain>",
+            "[Call chains]",
+            "\n".join(call_chain_lines) or "<no call chain>",
             "[Code snippet]",
             self._format_snippet(snippet) or "<no snippet provided>",
         ]
@@ -163,7 +171,8 @@ class VulnReviewAgent(BaseAgent):
                     "mode": "precise",
                     "ruleId": rule_id,
                     "location": location,
-                    "callChain": call_chain,
+                    "callChain": call_chain_lines,
+                    "callChains": call_chains,
                     "astCalls": ast_calls,
                     "llm": {k: v for k, v in llm_output.items() if k != "raw"},
                     "snippet": self._format_snippet(snippet),
@@ -174,12 +183,19 @@ class VulnReviewAgent(BaseAgent):
             "ruleId": rule_id,
             "severity": severity.value,
             "location": location,
-            "callChain": call_chain,
+            "callChain": call_chain_lines,
+            "callChains": call_chains,
             "astCalls": ast_calls,
             "snippet": self._format_snippet(snippet),
             "opinionI18n": {
-                "zh": {"summary": f"精确 AI 复核：规则 {rule_id or 'N/A'}", "fixHint": None},
-                "en": {"summary": summary, "fixHint": None},
+                "zh": {
+                    "summary": f"精确 AI 复核：规则 {rule_id or 'N/A'}",
+                    "fixHint": "未调用外部 LLM（可能是 AI Client 未启用/缺少 baseUrl/apiKey/model，或调用失败）。请检查平台 AI 客户端配置以及 ai-service 日志。",
+                },
+                "en": {
+                    "summary": summary,
+                    "fixHint": "External LLM not invoked (missing/disabled baseUrl/apiKey/model, or call failed). Check AI client config and ai-service logs.",
+                },
             },
         }
         return AgentFinding(
@@ -215,9 +231,12 @@ class VulnReviewAgent(BaseAgent):
             return None
 
         url = base_url.rstrip("/")
-        if not url.endswith("/v1"):
-            url = f"{url}/v1"
-        url = f"{url}/chat/completions"
+        if re.search(r"/chat/completions[^/]*$", url):
+            pass
+        elif re.search(r"/v\\d+$", url):
+            url = f"{url}/chat/completions"
+        else:
+            url = f"{url}/v1/chat/completions"
 
         system = (
             "You are a security engineer reviewing one static-analysis finding. "
@@ -278,6 +297,10 @@ class VulnReviewAgent(BaseAgent):
     def _format_enrichment(self, enrichment: Any) -> str:
         if not isinstance(enrichment, dict) or not enrichment:
             return ""
+
+        blocks = enrichment.get("blocks")
+        if isinstance(blocks, list) and blocks:
+            return self._format_enrichment_blocks(enrichment=enrichment, blocks=blocks)
 
         def truncate(value: Any, limit: int) -> Any:
             if isinstance(value, str):
@@ -365,6 +388,142 @@ class VulnReviewAgent(BaseAgent):
             return json.dumps(compact, ensure_ascii=False, indent=2)
         except Exception:
             return str(compact)
+
+    def _format_enrichment_blocks(self, enrichment: Dict[str, Any], blocks: List[Any]) -> str:
+        def i18n(value: Any) -> Dict[str, str]:
+            if not isinstance(value, dict):
+                return {}
+            out: Dict[str, str] = {}
+            for key in ("zh", "en"):
+                v = value.get(key)
+                if isinstance(v, str) and v.strip():
+                    out[key] = v.strip()
+            return out
+
+        def pick(i18n_map: Dict[str, str]) -> str:
+            return i18n_map.get("en") or i18n_map.get("zh") or ""
+
+        def safe_int_list(value: Any, limit: int = 8) -> List[int]:
+            if not isinstance(value, list):
+                return []
+            out: List[int] = []
+            for item in value:
+                if isinstance(item, int):
+                    out.append(item)
+                elif isinstance(item, str) and item.isdigit():
+                    out.append(int(item))
+                if len(out) >= limit:
+                    break
+            return out
+
+        lines: List[str] = []
+        engine = enrichment.get("engine")
+        generated_at = enrichment.get("generatedAt")
+        version = enrichment.get("version")
+        header = []
+        if engine:
+            header.append(f"engine={engine}")
+        if version:
+            header.append(f"version={version}")
+        if generated_at:
+            header.append(f"generatedAt={generated_at}")
+        if header:
+            lines.append("EnrichmentBlocks(" + ", ".join(header) + ")")
+        else:
+            lines.append("EnrichmentBlocks")
+
+        for idx, raw in enumerate(blocks[:12], start=1):
+            if not isinstance(raw, dict):
+                continue
+            block_id = raw.get("id") or raw.get("blockId") or f"block-{idx}"
+            kind = raw.get("kind") or "BLOCK"
+
+            reason = raw.get("reason") if isinstance(raw.get("reason"), dict) else {}
+            title = pick(i18n(reason.get("titleI18n"))) or reason.get("code") or kind
+            details = pick(i18n(reason.get("detailsI18n")))
+
+            file_obj = raw.get("file") if isinstance(raw.get("file"), dict) else {}
+            path = file_obj.get("path")
+
+            rng = raw.get("range") if isinstance(raw.get("range"), dict) else {}
+            start_line = rng.get("startLine")
+            end_line = rng.get("endLine")
+            highlights = safe_int_list(rng.get("highlightLines"))
+
+            related = raw.get("related") if isinstance(raw.get("related"), dict) else {}
+            node_id = related.get("nodeId")
+            node_label = related.get("label")
+            role = related.get("role")
+            chain_index = related.get("chainIndex")
+            step_index = related.get("stepIndex")
+
+            suffix = []
+            if isinstance(chain_index, int) and isinstance(step_index, int):
+                suffix.append(f"Chain {chain_index} Step {step_index}")
+            if isinstance(role, str) and role.strip():
+                suffix.append(f"role={role.strip()}")
+            if isinstance(node_id, str) and node_id.strip():
+                suffix.append(f"nodeId={node_id.strip()}")
+
+            loc = ""
+            if isinstance(path, str) and path.strip():
+                loc = path.strip()
+                if isinstance(start_line, int) and isinstance(end_line, int):
+                    loc += f" ({start_line}-{end_line})"
+                elif isinstance(start_line, int):
+                    loc += f" (start={start_line})"
+                if highlights:
+                    loc += f" highlight={highlights}"
+
+            title_line = f"Block {idx}: {title} [{kind}] ({block_id})"
+            if loc:
+                title_line += f" @ {loc}"
+            if suffix:
+                title_line += "  " + " ".join(suffix)
+            lines.append(title_line)
+
+            if details:
+                lines.append(f"  Why: {details}")
+            if isinstance(node_label, str) and node_label.strip() and node_label != node_id:
+                lines.append(f"  Node: {node_label.strip()}")
+
+            method = raw.get("method") if isinstance(raw.get("method"), dict) else {}
+            sig = method.get("signature")
+            if isinstance(sig, str) and sig.strip():
+                lines.append(f"  Method: {sig.strip()}")
+
+            code = method.get("text")
+            if isinstance(code, str) and code.strip():
+                code_lines = code.strip().splitlines()
+                excerpt = code_lines[:45]
+                lines.append("  Code:")
+                lines.extend(["    " + ln for ln in excerpt])
+                if len(code_lines) > len(excerpt):
+                    lines.append("    …")
+
+            def list_lines(name: str, items: Any, limit: int) -> None:
+                if not isinstance(items, list) or not items:
+                    return
+                lines.append(f"  {name}:")
+                for item in items[:limit]:
+                    if not isinstance(item, dict):
+                        continue
+                    ln = item.get("line")
+                    text = item.get("text")
+                    prefix = f"    - {ln}: " if isinstance(ln, int) else "    - "
+                    if isinstance(text, str) and text.strip():
+                        t = text.strip()
+                        if len(t) > 360:
+                            t = t[:360] + "…"
+                        lines.append(prefix + t)
+
+            list_lines("Conditions", raw.get("conditions"), limit=20)
+            list_lines("Invocations", raw.get("invocations"), limit=25)
+            lines.append("")
+
+        while lines and lines[-1] == "":
+            lines.pop()
+        return "\n".join(lines)
 
     def _call_chat_completion(
         self,
@@ -584,16 +743,151 @@ class VulnReviewAgent(BaseAgent):
             formatted.append(f"{marker}{prefix}{content}")
         return "\n".join(formatted)
 
-    def _format_call_chain(self, nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> List[str]:
-        # naive path rendering: just list nodes in order; if edges present, sort by source-target appearance
-        if not nodes:
+    def _resolve_call_chains(
+        self, finding: Dict[str, Any], nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]
+    ) -> List[List[Dict[str, Any]]]:
+        from_payload = self._extract_call_chains_payload(finding.get("callChains"))
+        if from_payload:
+            return from_payload
+        return self._build_call_chains(nodes, edges)
+
+    def _extract_call_chains_payload(self, raw: Any) -> List[List[Dict[str, Any]]]:
+        if not isinstance(raw, list) or not raw:
             return []
-        ordered = nodes
-        lines = []
-        for idx, node in enumerate(ordered):
-            label = node.get("label") or node.get("id") or f"step-{idx}"
-            loc = f"{node.get('file','unknown')}:{node.get('line','')}"
-            lines.append(f"{idx+1}) {label} @ {loc}")
+        chains: List[List[Dict[str, Any]]] = []
+        for item in raw:
+            if isinstance(item, dict):
+                steps = item.get("steps")
+                if not isinstance(steps, list):
+                    continue
+                chain: List[Dict[str, Any]] = []
+                for step in steps:
+                    if not isinstance(step, dict):
+                        continue
+                    node_id = step.get("nodeId") or step.get("id")
+                    label = step.get("label") or node_id
+                    chain.append(
+                        {
+                            "id": node_id,
+                            "role": step.get("role"),
+                            "label": label,
+                            "file": step.get("file"),
+                            "line": step.get("line"),
+                            "startColumn": step.get("startColumn"),
+                            "endColumn": step.get("endColumn"),
+                            "value": step.get("snippet"),
+                        }
+                    )
+                if chain:
+                    chains.append(chain)
+            elif isinstance(item, list):
+                chain = [n for n in item if isinstance(n, dict)]
+                if chain:
+                    chains.append(chain)
+        return chains
+
+    def _build_call_chains(
+        self, nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]], max_chains: int = 20, max_depth: int = 200
+    ) -> List[List[Dict[str, Any]]]:
+        if not isinstance(nodes, list) or not nodes:
+            return []
+
+        node_by_id: Dict[str, Dict[str, Any]] = {}
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            node_id = node.get("id")
+            if isinstance(node_id, str) and node_id.strip():
+                node_by_id[node_id] = node
+
+        if not node_by_id:
+            return []
+
+        outgoing: Dict[str, List[str]] = {nid: [] for nid in node_by_id.keys()}
+        indegree: Dict[str, int] = {nid: 0 for nid in node_by_id.keys()}
+
+        if isinstance(edges, list):
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    continue
+                s = edge.get("source")
+                t = edge.get("target")
+                if s in node_by_id and t in node_by_id:
+                    outgoing[s].append(t)
+                    indegree[t] = indegree.get(t, 0) + 1
+
+        starts = [nid for nid in node_by_id.keys() if indegree.get(nid, 0) == 0]
+        if not starts:
+            starts = [next(iter(node_by_id.keys()))]
+
+        seen = set()
+        paths: List[List[str]] = []
+
+        def is_terminal(nid: str) -> bool:
+            node = node_by_id.get(nid) or {}
+            role = node.get("role")
+            if isinstance(role, str) and role.upper() == "SINK":
+                return True
+            return not outgoing.get(nid)
+
+        def record(path: List[str]) -> None:
+            key = "->".join(path)
+            if key in seen:
+                return
+            seen.add(key)
+            paths.append(list(path))
+
+        def dfs(curr: str, path: List[str]) -> None:
+            if len(paths) >= max_chains:
+                return
+            if len(path) >= max_depth or is_terminal(curr):
+                record(path)
+                return
+            nexts = outgoing.get(curr) or []
+            if not nexts:
+                record(path)
+                return
+            for nxt in nexts:
+                if nxt in path:
+                    continue
+                path.append(nxt)
+                dfs(nxt, path)
+                path.pop()
+                if len(paths) >= max_chains:
+                    return
+
+        for s in starts:
+            dfs(s, [s])
+            if len(paths) >= max_chains:
+                break
+
+        if not paths:
+            paths = [list(node_by_id.keys())]
+
+        return [[node_by_id[nid] for nid in path if nid in node_by_id] for path in paths if path]
+
+    def _format_call_chains(self, chains: List[List[Dict[str, Any]]]) -> List[str]:
+        if not chains:
+            return []
+        lines: List[str] = []
+        for idx, chain in enumerate(chains, start=1):
+            lines.append(f"Chain {idx} (steps={len(chain)}):")
+            for step_idx, node in enumerate(chain, start=1):
+                label = node.get("label") or node.get("id") or f"step-{step_idx}"
+                loc = f"{node.get('file','unknown')}:{node.get('line','')}"
+                role = node.get("role")
+                role_text = f"[{role}] " if isinstance(role, str) and role.strip() else ""
+                lines.append(f"  {step_idx}) {role_text}{label} @ {loc}")
+                value = node.get("value")
+                if isinstance(value, str) and value.strip():
+                    snippet = value.strip().splitlines()[0].strip()
+                    if len(snippet) > 240:
+                        snippet = snippet[:240] + "…"
+                    if snippet and snippet != str(label).strip():
+                        lines.append(f"     {snippet}")
+            lines.append("")
+        while lines and lines[-1] == "":
+            lines.pop()
         return lines
 
     def _extract_calls(self, code: str, path: str) -> List[str]:
