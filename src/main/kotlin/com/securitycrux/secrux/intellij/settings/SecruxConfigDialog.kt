@@ -36,6 +36,8 @@ class SecruxConfigDialog(
     private val taskIdField = JBTextField(settings.state.taskId)
     private val includeSnippetsCheckbox =
         JBCheckBox(SecruxBundle.message("label.includeSnippets"), settings.state.includeSnippetsOnReport)
+    private val includeEnrichmentCheckbox =
+        JBCheckBox(SecruxBundle.message("label.includeEnrichment"), settings.state.includeEnrichmentOnReport)
     private val excludedPathsRegexField = JBTextField(settings.state.excludedPathRegex).apply {
         toolTipText = SecruxBundle.message("tooltip.excludePathsRegex")
     }
@@ -138,6 +140,7 @@ class SecruxConfigDialog(
 
         form.add(JBLabel(SecruxBundle.message("config.section.scan")))
         form.add(includeSnippetsCheckbox)
+        form.add(includeEnrichmentCheckbox)
         form.add(JBLabel(SecruxBundle.message("label.excludePathsRegex")))
         form.add(excludedPathsRegexField)
         form.add(JBLabel(SecruxBundle.message("label.excludeSinkTypes")))
@@ -171,6 +174,7 @@ class SecruxConfigDialog(
         settings.state.baseUrl = baseUrlField.text.trim()
         settings.state.taskId = taskIdField.text.trim()
         settings.state.includeSnippetsOnReport = includeSnippetsCheckbox.isSelected
+        settings.state.includeEnrichmentOnReport = includeEnrichmentCheckbox.isSelected
         settings.state.excludedPathRegex = excludedPathsRegexField.text.trim()
         settings.state.excludedSinkTypes =
             excludedSinkTypesField.text.split(',')
@@ -201,4 +205,3 @@ class SecruxConfigDialog(
         }
     }
 }
-

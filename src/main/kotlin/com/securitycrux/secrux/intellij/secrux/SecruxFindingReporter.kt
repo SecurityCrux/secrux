@@ -1,14 +1,22 @@
 package com.securitycrux.secrux.intellij.secrux
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
+import com.intellij.psi.PsiManager
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.util.PsiTreeUtil
+import com.securitycrux.secrux.intellij.callgraph.CallEdge
+import com.securitycrux.secrux.intellij.callgraph.CallEdgeKind
 import com.securitycrux.secrux.intellij.callgraph.CallGraph
 import com.securitycrux.secrux.intellij.callgraph.CallGraphService
+import com.securitycrux.secrux.intellij.callgraph.CallSiteLocation
 import com.securitycrux.secrux.intellij.callgraph.MethodLocation
 import com.securitycrux.secrux.intellij.callgraph.MethodRef
+import com.securitycrux.secrux.intellij.enrichment.SecruxPsiUastEnrichmentService
 import com.securitycrux.secrux.intellij.i18n.SecruxBundle
 import com.securitycrux.secrux.intellij.sinks.SinkMatch
 import com.securitycrux.secrux.intellij.util.SecruxNotifications
@@ -44,6 +52,7 @@ class SecruxFindingReporter(
         matches: List<SinkMatch>,
         severity: SecruxSeverity,
         includeSnippets: Boolean,
+        includeEnrichment: Boolean,
         triggerAiReview: Boolean = false,
         waitAiReview: Boolean = false,
         includeCallChains: Boolean = true,
@@ -55,16 +64,30 @@ class SecruxFindingReporter(
         val fileDocumentManager = FileDocumentManager.getInstance()
         val callGraphService = CallGraphService.getInstance(project)
         val graphSnapshot = callGraphService.getLastGraph()
+        val enrichmentService = SecruxPsiUastEnrichmentService(project)
         val findings =
             buildJsonArray {
                 for ((i, match) in matches.withIndex()) {
                     indicator.checkCanceled()
                     indicator.fraction = i.toDouble() / matches.size.coerceAtLeast(1).toDouble()
-                    val document = fileDocumentManager.getDocument(match.file)
-                    val relativePath = toProjectRelativePath(match.file.path)
                     val line = match.line
                     val startColumn = match.column
-                    val endColumn = computeEndColumn(document, match.endOffset)
+                    val snapshot =
+                        ReadAction.compute<MatchLocationSnapshot, RuntimeException> {
+                            val document = fileDocumentManager.getDocument(match.file)
+                            val relativePath = toProjectRelativePath(match.file.path)
+                            val endColumn = computeEndColumn(document, match.endOffset)
+                            val snippet =
+                                if (includeSnippets && document != null) {
+                                    buildSnippet(document, relativePath, line, context = 5)
+                                } else {
+                                    null
+                                }
+                            val sinkLineText = if (document != null) getLineText(document, line).take(400) else null
+                            MatchLocationSnapshot(relativePath = relativePath, endColumn = endColumn, snippet = snippet, sinkLineText = sinkLineText)
+                        }
+                    val relativePath = snapshot.relativePath
+                    val endColumn = snapshot.endColumn
                     val fingerprint =
                         fingerprint(
                             match.type.name,
@@ -75,8 +98,8 @@ class SecruxFindingReporter(
                             match.targetMember,
                             match.targetParamCount.toString()
                         )
-                    val snippet = if (includeSnippets && document != null) buildSnippet(document, relativePath, line, context = 5) else null
-                    val sinkLineText = if (document != null) getLineText(document, line).take(400) else null
+                    val snippet = snapshot.snippet
+                    val sinkLineText = snapshot.sinkLineText
                     val callChainMode =
                         CallChainMode(
                             include = includeCallChains,
@@ -85,11 +108,13 @@ class SecruxFindingReporter(
                     val callChains =
                         if (callChainMode.include && graphSnapshot != null) {
                             val target =
-                                MethodRef(
-                                    classFqn = match.targetClassFqn,
-                                    name = match.targetMember,
-                                    paramCount = match.targetParamCount
-                                )
+                                match.enclosingMethodId
+                                    ?.let { MethodRef.fromIdOrNull(it) }
+                                    ?: MethodRef(
+                                        classFqn = match.targetClassFqn,
+                                        name = match.targetMember,
+                                        paramCount = match.targetParamCount,
+                                    )
                             buildCallChains(callGraphService, graphSnapshot, target, maxDepth = 8, maxChains = 20, mode = callChainMode)
                         } else {
                             emptyList()
@@ -144,6 +169,19 @@ class SecruxFindingReporter(
                             }
                         }
 
+                    val enrichment =
+                        if (includeEnrichment) {
+                            enrichmentService.buildEnrichment(
+                                primaryFile = match.file,
+                                primaryOffset = match.startOffset,
+                                primaryPath = relativePath,
+                                primaryLine = line,
+                                dataflow = dataflow
+                            )
+                        } else {
+                            null
+                        }
+
                     add(
                         buildJsonObject {
                             put("sourceEngine", "secrux-intellij-plugin")
@@ -168,6 +206,9 @@ class SecruxFindingReporter(
                                     put("codeSnippet", snippet)
                                 }
                                 put("dataflow", dataflow)
+                                if (enrichment != null) {
+                                    put("enrichment", enrichment)
+                                }
                                 if (sarifCodeFlows != null) {
                                     putJsonObject("sarif") {
                                         put("version", "2.1.0")
@@ -490,6 +531,13 @@ class SecruxFindingReporter(
         return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
+    private data class MatchLocationSnapshot(
+        val relativePath: String,
+        val endColumn: Int?,
+        val snippet: JsonObject?,
+        val sinkLineText: String?,
+    )
+
     private data class CallChainMode(
         val include: Boolean,
         val requireEntryPoint: Boolean
@@ -533,11 +581,35 @@ class SecruxFindingReporter(
         fileDocumentManager: FileDocumentManager
     ): StepLocation {
         if (location == null) return StepLocation(path = null, line = null, startColumn = null, endColumn = null, snippet = null)
-        val rel = toProjectRelativePath(location.file.path)
-        val document = fileDocumentManager.getDocument(location.file) ?: return StepLocation(rel, null, null, null, null)
-        val (line, col) = computeLineAndColumn(document, location.startOffset)
-        val text = getLineText(document, line).take(400)
-        return StepLocation(path = rel, line = line, startColumn = col, endColumn = null, snippet = text)
+        return ReadAction.compute<StepLocation, RuntimeException> {
+            val rel = toProjectRelativePath(location.file.path)
+            val document = fileDocumentManager.getDocument(location.file) ?: return@compute StepLocation(rel, null, null, null, null)
+            val adjustedOffset =
+                runCatching {
+                    val psiFile = PsiManager.getInstance(project).findFile(location.file) ?: return@runCatching location.startOffset
+                    val element = psiFile.findElementAt(location.startOffset) ?: return@runCatching location.startOffset
+                    val method = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java, /* strict = */ false) ?: return@runCatching location.startOffset
+                    method.nameIdentifier?.textRange?.startOffset ?: location.startOffset
+                }.getOrNull() ?: location.startOffset
+
+            val (line, col) = computeLineAndColumn(document, adjustedOffset)
+            val text = getLineText(document, line).take(400)
+            StepLocation(path = rel, line = line, startColumn = col, endColumn = null, snippet = text)
+        }
+    }
+
+    private fun locationForCallSite(
+        location: CallSiteLocation?,
+        fileDocumentManager: FileDocumentManager,
+    ): StepLocation {
+        if (location == null) return StepLocation(path = null, line = null, startColumn = null, endColumn = null, snippet = null)
+        return ReadAction.compute<StepLocation, RuntimeException> {
+            val rel = toProjectRelativePath(location.file.path)
+            val document = fileDocumentManager.getDocument(location.file) ?: return@compute StepLocation(rel, null, null, null, null)
+            val (line, col) = computeLineAndColumn(document, location.startOffset)
+            val text = getLineText(document, line).take(400)
+            StepLocation(path = rel, line = line, startColumn = col, endColumn = null, snippet = text)
+        }
     }
 
     private fun buildDataflowFromCallChains(
@@ -552,7 +624,13 @@ class SecruxFindingReporter(
         fileDocumentManager: FileDocumentManager
     ): JsonObject {
         var nodeCounter = 0
-        val edges = mutableListOf<Pair<String, String>>()
+        data class DataflowEdge(
+            val source: String,
+            val target: String,
+            val edgeKind: String?,
+        )
+
+        val edges = mutableListOf<DataflowEdge>()
 
         val nodes =
             buildJsonArray {
@@ -563,10 +641,17 @@ class SecruxFindingReporter(
                         } else {
                             chain
                         }
-                    val steps = trimmedChain.map { ref -> ref to locationForMethod(graph.methods[ref], fileDocumentManager) }
-                    var prev: String? = null
-                    for ((idx, step) in steps.withIndex()) {
-                        val (ref, loc) = step
+                    var prevNodeId: String? = null
+                    var prevMethodRef: MethodRef? = null
+                    for ((idx, ref) in trimmedChain.withIndex()) {
+                        val loc =
+                            if (idx < trimmedChain.lastIndex) {
+                                val next = trimmedChain[idx + 1]
+                                val edgeLoc = locationForCallSite(graph.callSites[CallEdge(caller = ref, callee = next)], fileDocumentManager)
+                                if (edgeLoc.path == null) locationForMethod(graph.methods[ref], fileDocumentManager) else edgeLoc
+                            } else {
+                                locationForMethod(graph.methods[ref], fileDocumentManager)
+                            }
                         val id = "n${nodeCounter++}"
                         val role = when {
                             idx == 0 && ref in graph.entryPoints -> "SOURCE"
@@ -584,8 +669,14 @@ class SecruxFindingReporter(
                                 loc.snippet?.let { put("value", it) }
                             }
                         )
-                        prev?.let { edges.add(it to id) }
-                        prev = id
+                        prevNodeId?.let { prevId ->
+                            val edgeKind = prevMethodRef?.let { prevRef ->
+                                graph.edgeKinds[CallEdge(caller = prevRef, callee = ref)]?.name
+                            }
+                            edges.add(DataflowEdge(source = prevId, target = id, edgeKind = edgeKind))
+                        }
+                        prevNodeId = id
+                        prevMethodRef = ref
                     }
 
                     val sinkId = "n${nodeCounter++}"
@@ -601,18 +692,19 @@ class SecruxFindingReporter(
                             if (sinkLineText != null) put("value", sinkLineText)
                         }
                     )
-                    prev?.let { edges.add(it to sinkId) }
+                    prevNodeId?.let { edges.add(DataflowEdge(source = it, target = sinkId, edgeKind = "SINK")) }
                 }
             }
 
         val edgesJson =
             buildJsonArray {
-                for ((source, target) in edges) {
+                for (edge in edges) {
                     add(
                         buildJsonObject {
-                            put("source", source)
-                            put("target", target)
+                            put("source", edge.source)
+                            put("target", edge.target)
                             put("label", "callChain")
+                            edge.edgeKind?.let { put("edgeKind", it) }
                         }
                     )
                 }
@@ -650,17 +742,33 @@ class SecruxFindingReporter(
                             add(
                                 buildJsonObject {
                                     putJsonArray("locations") {
-                                        val steps =
-                                            trimmedChain.map { ref ->
-                                                val loc = locationForMethod(graph.methods[ref], fileDocumentManager)
-                                                ref to loc
-                                            }
-
-                                        for ((idx, step) in steps.withIndex()) {
-                                            val (ref, loc) = step
+                                        for ((idx, ref) in trimmedChain.withIndex()) {
+                                            val next =
+                                                if (idx < trimmedChain.lastIndex) {
+                                                    trimmedChain[idx + 1]
+                                                } else {
+                                                    null
+                                                }
+                                            val edgeKind =
+                                                if (next != null) {
+                                                    graph.edgeKinds[CallEdge(caller = ref, callee = next)]
+                                                } else {
+                                                    null
+                                                }
+                                            val loc =
+                                                if (next != null) {
+                                                    val edgeLoc =
+                                                        locationForCallSite(
+                                                            graph.callSites[CallEdge(caller = ref, callee = next)],
+                                                            fileDocumentManager,
+                                                        )
+                                                    if (edgeLoc.path == null) locationForMethod(graph.methods[ref], fileDocumentManager) else edgeLoc
+                                                } else {
+                                                    locationForMethod(graph.methods[ref], fileDocumentManager)
+                                                }
                                             add(
                                                 buildThreadFlowLocation(
-                                                    message = buildStepMessage(idx, ref, graph),
+                                                    message = buildStepMessage(idx, ref, next, edgeKind, graph),
                                                     location = loc
                                                 )
                                             )
@@ -689,9 +797,21 @@ class SecruxFindingReporter(
         }
     }
 
-    private fun buildStepMessage(index: Int, ref: MethodRef, graph: CallGraph): String {
-        if (index == 0 && ref in graph.entryPoints) return "entrypoint: ${ref.id}"
-        return "call: ${ref.id}"
+    private fun buildStepMessage(
+        index: Int,
+        ref: MethodRef,
+        next: MethodRef?,
+        edgeKind: CallEdgeKind?,
+        graph: CallGraph
+    ): String {
+        val prefix = if (index == 0 && ref in graph.entryPoints) "entrypoint" else "call"
+        val kindSuffix =
+            when (edgeKind) {
+                CallEdgeKind.IMPL, CallEdgeKind.EXTE -> "[${edgeKind.name}]"
+                else -> ""
+            }
+        val nextSuffix = next?.let { " -> ${it.id}" }.orEmpty()
+        return "$prefix$kindSuffix: ${ref.id}$nextSuffix"
     }
 
     private fun buildThreadFlowLocation(message: String, location: StepLocation): JsonObject =

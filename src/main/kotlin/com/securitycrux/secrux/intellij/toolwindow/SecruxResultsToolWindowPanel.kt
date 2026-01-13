@@ -30,6 +30,7 @@ import com.securitycrux.secrux.intellij.sinks.SinkMatch
 import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import kotlin.math.abs
 import javax.swing.JComboBox
 import javax.swing.JButton
 import javax.swing.JPanel
@@ -120,13 +121,43 @@ class SecruxResultsToolWindowPanel(
                         match.line,
                         match.column
                     )
+                val sinkMethodRef = match.enclosingMethodId?.let { MethodRef.fromIdOrNull(it) }
                 val target =
+                    sinkMethodRef
+                        ?: MethodRef(
+                            classFqn = match.targetClassFqn,
+                            name = match.targetMember,
+                            paramCount = match.targetParamCount,
+                        )
+                val sinkCalleeRef =
                     MethodRef(
                         classFqn = match.targetClassFqn,
                         name = match.targetMember,
-                        paramCount = match.targetParamCount
+                        paramCount = match.targetParamCount,
                     )
-                val infoLines = listOf(SecruxBundle.message("dialog.callChains.target", target.id))
+                val infoLines =
+                    buildList {
+                        add(SecruxBundle.message("dialog.callChains.target", target.id))
+                        if (sinkMethodRef != null) {
+                            add("sinkCall: ${match.targetClassFqn}#${match.targetMember}/${match.targetParamCount}")
+                            val summaries = callGraphService.getLastMethodSummaries()
+                            val summary = summaries?.summaries?.get(sinkMethodRef)
+                            val callsite =
+                                summary?.calls
+                                    ?.filter { it.calleeId == sinkCalleeRef.id }
+                                    ?.minByOrNull { cs ->
+                                        val off = cs.callOffset ?: Int.MAX_VALUE
+                                        abs(off - match.startOffset)
+                                    }
+                            if (callsite != null) {
+                                val recv = callsite.receiver ?: "UNKNOWN"
+                                val args = callsite.args.joinToString(",")
+                                val ret = callsite.result ?: "UNKNOWN"
+                                val loc = callsite.callOffset?.let { " @${it}" }.orEmpty()
+                                add("sinkCallsite: recv=$recv args=[$args] ret=$ret$loc")
+                            }
+                        }
+                    }
 
                 if (entryPointOnly && entryPoints.isEmpty()) {
                     sections.add(
@@ -167,11 +198,34 @@ class SecruxResultsToolWindowPanel(
                     continue
                 }
 
+                val sinkLabel = "sink: ${match.targetClassFqn}#${match.targetMember}/${match.targetParamCount}"
+                val stepChains =
+                    filteredChains.map { chain ->
+                        val trimmed =
+                            if (chain.isNotEmpty() && graph.methods[chain.last()] == null) {
+                                chain.dropLast(1)
+                            } else {
+                                chain
+                            }
+                        buildList<CallChainsDialog.Step> {
+                            for (ref in trimmed) add(CallChainsDialog.MethodStep(ref))
+                            add(
+                                CallChainsDialog.SinkStep(
+                                    label = sinkLabel,
+                                    file = match.file,
+                                    startOffset = match.startOffset,
+                                    line = match.line,
+                                    column = match.column,
+                                ),
+                            )
+                        }
+                    }
+
                 sections.add(
                     CallChainsDialog.Section(
                         header = header,
                         infoLines = infoLines,
-                        chains = filteredChains
+                        chains = stepChains
                     )
                 )
             }
@@ -201,6 +255,7 @@ class SecruxResultsToolWindowPanel(
                     initialBaseUrl = settings.state.baseUrl,
                     initialTaskId = settings.state.taskId,
                     initialIncludeSnippets = settings.state.includeSnippetsOnReport,
+                    initialIncludeEnrichment = settings.state.includeEnrichmentOnReport,
                     initialTriggerAiReview = settings.state.triggerAiReviewOnReport,
                     initialWaitAiReview = settings.state.waitAiReviewOnReport
                 )
@@ -209,6 +264,7 @@ class SecruxResultsToolWindowPanel(
             val baseUrl = dialog.baseUrl
             val taskId = dialog.taskId
             val includeSnippets = dialog.includeSnippets
+            val includeEnrichment = dialog.includeEnrichment
             val severity = dialog.severity
             val triggerAiReview = dialog.triggerAiReview
             val waitAiReview = dialog.waitAiReview
@@ -225,6 +281,7 @@ class SecruxResultsToolWindowPanel(
             settings.state.baseUrl = baseUrl
             settings.state.taskId = taskId
             settings.state.includeSnippetsOnReport = includeSnippets
+            settings.state.includeEnrichmentOnReport = includeEnrichment
             settings.state.triggerAiReviewOnReport = triggerAiReview
             settings.state.waitAiReviewOnReport = waitAiReview
 
@@ -259,6 +316,7 @@ class SecruxResultsToolWindowPanel(
                             matches = selected,
                             severity = severity,
                             includeSnippets = includeSnippets,
+                            includeEnrichment = includeEnrichment,
                             triggerAiReview = triggerAiReview,
                             waitAiReview = waitAiReview,
                             includeCallChains = true,

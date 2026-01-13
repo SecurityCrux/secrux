@@ -13,5 +13,6 @@ data class SinkMatch(
     val endOffset: Int,
     val line: Int,
     val column: Int,
-    val enclosingMethodFqn: String?
+    val enclosingMethodFqn: String?,
+    val enclosingMethodId: String?
 )

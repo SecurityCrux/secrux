@@ -155,7 +155,7 @@ class SinkScanService(
                             val endOffset = textRange.endOffset
 
                             val (line, column) = computeLineColumn(document, startOffset)
-                            val enclosingMethod = enclosingMethodFqn(node)
+                            val enclosing = enclosingMethodInfo(node)
 
                             for (type in filteredTypes) {
                                 results.add(
@@ -169,7 +169,8 @@ class SinkScanService(
                                         endOffset = endOffset,
                                         line = line,
                                         column = column,
-                                        enclosingMethodFqn = enclosingMethod
+                                        enclosingMethodFqn = enclosing.displayFqn,
+                                        enclosingMethodId = enclosing.methodId,
                                     )
                                 )
                             }
@@ -224,15 +225,36 @@ class SinkScanService(
         return line to column
     }
 
-    private fun enclosingMethodFqn(node: UCallExpression): String? {
+    private data class EnclosingMethodInfo(
+        val displayFqn: String?,
+        val methodId: String?,
+    )
+
+    private fun enclosingMethodInfo(node: UCallExpression): EnclosingMethodInfo {
         var parent = node.uastParent
         while (parent != null && parent !is UMethod) {
             parent = parent.uastParent
         }
-        val method = parent as? UMethod ?: return null
+        val method = parent as? UMethod ?: return EnclosingMethodInfo(displayFqn = null, methodId = null)
         val psiMethod = method.javaPsi
-        val className = psiMethod.containingClass?.qualifiedName ?: return psiMethod.name
-        return "$className#${psiMethod.name}"
+        val classFqn = psiMethod.containingClass?.qualifiedName
+        val methodName = if (psiMethod.isConstructor) "<init>" else psiMethod.name
+        val paramCount = psiMethod.parameterList.parametersCount
+
+        val displayFqn =
+            if (!classFqn.isNullOrBlank()) {
+                "$classFqn#$methodName"
+            } else {
+                psiMethod.name
+            }
+        val methodId =
+            if (!classFqn.isNullOrBlank()) {
+                "$classFqn#$methodName/$paramCount"
+            } else {
+                null
+            }
+
+        return EnclosingMethodInfo(displayFqn = displayFqn, methodId = methodId)
     }
 
     private fun applyHighlights(matches: List<SinkMatch>) {

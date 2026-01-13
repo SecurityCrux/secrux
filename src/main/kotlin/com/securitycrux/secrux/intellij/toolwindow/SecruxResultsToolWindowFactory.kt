@@ -12,23 +12,56 @@ import com.securitycrux.secrux.intellij.i18n.SecruxI18nListener
 class SecruxResultsToolWindowFactory : ToolWindowFactory {
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        toolWindow.setStripeTitleProvider { SecruxBundle.message("toolwindow.results.stripeTitle") }
-        toolWindow.title = SecruxBundle.message("toolwindow.results.stripeTitle")
-        val panel = SecruxResultsToolWindowPanel(project)
-        val content = ContentFactory.getInstance().createContent(panel, null, false)
+        fun applyTitles() {
+            toolWindow.setStripeTitleProvider { SecruxBundle.message("toolwindow.results.stripeTitle") }
+            toolWindow.title = SecruxBundle.message("toolwindow.results.stripeTitle")
+        }
+
+        applyTitles()
+
         val disposable = Disposer.newDisposable("SecruxResultsToolWindow")
-        content.setDisposer(disposable)
+
+        val sinksPanel = SecruxResultsToolWindowPanel(project)
+        val tasksPanel = SecruxTasksToolWindowPanel(project)
+        val findingsPanel = SecruxFindingsToolWindowPanel(project)
+
+        val sinksContent =
+            ContentFactory.getInstance()
+                .createContent(sinksPanel, SecruxBundle.message("toolwindow.results.tab.sinks"), false)
+        val tasksContent =
+            ContentFactory.getInstance()
+                .createContent(tasksPanel, SecruxBundle.message("toolwindow.results.tab.tasks"), false)
+        val findingsContent =
+            ContentFactory.getInstance()
+                .createContent(findingsPanel, SecruxBundle.message("toolwindow.results.tab.findings"), false)
+
+        val sinksDisposable = Disposer.newDisposable(disposable, "SecruxResultsToolWindow:Sinks")
+        val tasksDisposable = Disposer.newDisposable(disposable, "SecruxResultsToolWindow:Tasks")
+        val findingsDisposable = Disposer.newDisposable(disposable, "SecruxResultsToolWindow:Findings")
+
+        sinksContent.setDisposer(sinksDisposable)
+        tasksContent.setDisposer(tasksDisposable)
+        findingsContent.setDisposer(findingsDisposable)
+
+        sinksPanel.bind(sinksDisposable)
+        tasksPanel.bind(tasksDisposable)
+        findingsPanel.bind(findingsDisposable)
+
         ApplicationManager.getApplication()
             .messageBus
             .connect(disposable)
             .subscribe(
                 SecruxI18nListener.TOPIC,
                 SecruxI18nListener {
-                    toolWindow.setStripeTitleProvider { SecruxBundle.message("toolwindow.results.stripeTitle") }
-                    toolWindow.title = SecruxBundle.message("toolwindow.results.stripeTitle")
+                    applyTitles()
+                    sinksContent.displayName = SecruxBundle.message("toolwindow.results.tab.sinks")
+                    tasksContent.displayName = SecruxBundle.message("toolwindow.results.tab.tasks")
+                    findingsContent.displayName = SecruxBundle.message("toolwindow.results.tab.findings")
                 }
             )
-        panel.bind(disposable)
-        toolWindow.contentManager.addContent(content)
+
+        toolWindow.contentManager.addContent(sinksContent)
+        toolWindow.contentManager.addContent(tasksContent)
+        toolWindow.contentManager.addContent(findingsContent)
     }
 }

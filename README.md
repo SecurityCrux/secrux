@@ -33,7 +33,7 @@ Commands:
 1. **Audit memo**: Right-click PSI/UAST nodes (methods/fields/vars) to pin them into a memo list; click to navigate back.
 2. **Sink search**: Initialize sinks from a configurable list, highlight matches in editors, and show results in a bottom panel.
 3. **Call-chain discovery**: For each sink, reverse-search call chains using the call graph (with depth/path limits).
-4. **Entry-point detection**: Detect Spring Boot controllers as entry points and optionally filter call chains to those reaching them.
+4. **Entry-point detection**: Detect common Java/Kotlin entry points (Spring MVC, JAX-RS, Micronaut, Quarkus Routes, Servlet, WebSocket, gRPC, Dubbo, `main`) and optionally filter call chains to those reaching them.
 5. **Secrux integration**: Report call chains to Secrux using SARIF 2.1.0 (`codeFlows`) so the platform can reuse existing finding/AI review components.
 6. **More**: Extensible actions (e.g., export, compare baselines, quick triage states).
 

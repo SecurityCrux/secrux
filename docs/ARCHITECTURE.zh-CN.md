@@ -100,17 +100,21 @@ IDE 高亮：
 
 - 仅展示触达至少一个 **Entry Point** 的链路。
 
-### 入口点识别（Spring Boot）
+### 入口点识别（Java/Kotlin）
 
-扫描识别：
+入口点识别基于常见框架模式（尽力而为）：
 
-- `@RestController` / `@Controller`
-- 方法上的映射注解：
-  - `@RequestMapping`, `@GetMapping`, `@PostMapping` 等
+- Spring MVC：`@RestController` / `@Controller` + `@RequestMapping` / `@GetMapping` / ...
+- JAX-RS（Jersey/RESTEasy/Quarkus/Dropwizard）：`@Path` + `@GET` / `@POST` / ...（也支持 `@HttpMethod` 元注解）
+- Micronaut：`@Controller` + `@Get` / `@Post` / ...
+- Quarkus Vert.x Routes：`@Route` / `@RouteFilter`
+- Servlet 容器：`HttpServlet#doGet/doPost/.../service`、`Filter#doFilter`、`Servlet#service`
+- WebSocket：`@ServerEndpoint` + `@OnOpen/@OnClose/@OnMessage/@OnError`
+- gRPC：实现 `BindableService` 且方法签名包含 `StreamObserver`
+- Dubbo：`@DubboService`（以及 Dubbo 的 `@Service`）且方法覆盖接口方法（或 `$invoke`）
+- 普通 JVM 应用：`public static main(...)`
 
-记录为：
-
-- `EntryPoint(methodId, httpMapping?, file, location)`
+当前入口点以 `MethodRef` id 的形式记录在 CallGraph 的 `entryPoints` 中（见 `.idea/secrux/callgraph.json`）。
 
 ### 审计备忘录
 
@@ -155,4 +159,3 @@ IDE 高亮：
 - 静态 CallGraph 只能近似（动态分发、反射、Lombok、代理等）。
 - Kotlin/Java 混合项目在索引阶段可能出现部分节点无法解析。
 - 大型项目需要增量/缓存策略，否则耗时较长。
-

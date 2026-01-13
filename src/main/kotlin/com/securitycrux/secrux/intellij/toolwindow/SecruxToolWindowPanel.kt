@@ -207,17 +207,7 @@ class SecruxToolWindowPanel(
             .subscribe(
                 CallGraphListener.TOPIC,
                 CallGraphListener { graph ->
-                    callGraphStatusLabel.text =
-                        if (graph == null) {
-                            SecruxBundle.message("label.callGraphStatusNotBuilt")
-                        } else {
-                            SecruxBundle.message(
-                                "label.callGraphStatusBuilt",
-                                graph.stats.methodsIndexed,
-                                graph.stats.callEdges,
-                                graph.entryPoints.size
-                            )
-                        }
+                    callGraphStatusLabel.text = formatCallGraphStatus(graph)
                 }
             )
 
@@ -302,17 +292,63 @@ class SecruxToolWindowPanel(
 
     private fun refreshCallGraphStatus() {
         val graph = CallGraphService.getInstance(project).getLastGraph()
-        callGraphStatusLabel.text =
-            if (graph == null) {
-                SecruxBundle.message("label.callGraphStatusNotBuilt")
-            } else {
-                SecruxBundle.message(
-                    "label.callGraphStatusBuilt",
-                    graph.stats.methodsIndexed,
-                    graph.stats.callEdges,
-                    graph.entryPoints.size
+        callGraphStatusLabel.text = formatCallGraphStatus(graph)
+    }
+
+    private fun formatCallGraphStatus(graph: com.securitycrux.secrux.intellij.callgraph.CallGraph?): String {
+        if (graph == null) return SecruxBundle.message("label.callGraphStatusNotBuilt")
+        val service = CallGraphService.getInstance(project)
+        val base =
+            SecruxBundle.message(
+                "label.callGraphStatusBuilt",
+                graph.stats.methodsIndexed,
+                graph.stats.callEdges,
+                graph.entryPoints.size
+            )
+        val typeStats = service.getLastTypeHierarchy()?.stats
+        val methodSummaryStats = service.getLastMethodSummaries()?.stats
+        val frameworkStats = service.getLastFrameworkModel()?.stats
+        if (typeStats == null && methodSummaryStats == null && frameworkStats == null) return base
+
+        return buildString {
+            append(base)
+            if (typeStats != null) {
+                append("  ")
+                append(
+                    SecruxBundle.message(
+                        "label.callGraphStatus.typeHierarchy",
+                        typeStats.typesIndexed,
+                        typeStats.edges,
+                        typeStats.implEdges,
+                        typeStats.exteEdges
+                    )
                 )
             }
+            if (methodSummaryStats != null) {
+                append("  ")
+                append(
+                    SecruxBundle.message(
+                        "label.callGraphStatus.methodSummaries",
+                        methodSummaryStats.methodsWithFieldAccess,
+                        methodSummaryStats.distinctFields,
+                        methodSummaryStats.fieldReads,
+                        methodSummaryStats.fieldWrites
+                    )
+                )
+            }
+            if (frameworkStats != null) {
+                append("  ")
+                append(
+                    SecruxBundle.message(
+                        "label.callGraphStatus.frameworkModel",
+                        frameworkStats.beans,
+                        frameworkStats.injections,
+                        frameworkStats.classesWithBeans,
+                        frameworkStats.classesWithInjections
+                    )
+                )
+            }
+        }
     }
 
     private fun setMemoItems(items: List<AuditMemoItemState>) {

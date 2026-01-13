@@ -14,6 +14,7 @@ data class SecruxProjectSettingsState(
     var baseUrl: String = "http://localhost:8080",
     var taskId: String = "",
     var includeSnippetsOnReport: Boolean = true,
+    var includeEnrichmentOnReport: Boolean = false,
     var triggerAiReviewOnReport: Boolean = false,
     var waitAiReviewOnReport: Boolean = false,
     var memoItems: MutableList<AuditMemoItemState> = mutableListOf(),

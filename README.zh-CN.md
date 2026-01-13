@@ -33,7 +33,7 @@
 1. **代码审计备忘录**：右键 PSI/UAST 节点（方法/字段/变量等）加入备忘录，点击可跳回代码位置。
 2. **Sink 点搜索**：根据可配置的 sink 列表初始化并扫描，IDE 内高亮，并在下栏展示（文件名、位置、类型等）。
 3. **CallChain 匹配**：对每个 sink 反向搜索 CallChain（支持深度/路径上限）。
-4. **入口点定位**：对 Spring Boot 项目定位 controller 作为入口点，反向搜索可选“仅展示触及入口点的”链路。
+4. **入口点定位**：识别常见 Java/Kotlin 入口点（Spring MVC、JAX-RS、Micronaut、Quarkus Routes、Servlet、WebSocket、gRPC、Dubbo、`main`），反向搜索可选“仅展示触及入口点的”链路。
 5. **与 Secrux 平台联动**：将 call chain 以 SARIF 2.1.0（`codeFlows`）上报，复用平台现有 Findings/AI Review 能力。
 6. **其他能力**：可扩展动作（导出、基线对比、快速标记/分流等）。
 

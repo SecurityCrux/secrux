@@ -28,10 +28,28 @@ data class MethodLocation(
     val startOffset: Int
 )
 
+data class CallEdge(
+    val caller: MethodRef,
+    val callee: MethodRef
+)
+
+enum class CallEdgeKind {
+    CALL,
+    IMPL,
+    EXTE,
+}
+
+data class CallSiteLocation(
+    val file: VirtualFile,
+    val startOffset: Int
+)
+
 data class CallGraph(
     val methods: Map<MethodRef, MethodLocation>,
     val outgoing: Map<MethodRef, Set<MethodRef>>,
     val incoming: Map<MethodRef, Set<MethodRef>>,
+    val callSites: Map<CallEdge, CallSiteLocation> = emptyMap(),
+    val edgeKinds: Map<CallEdge, CallEdgeKind> = emptyMap(),
     val entryPoints: Set<MethodRef> = emptySet(),
     val stats: CallGraphStats
 )

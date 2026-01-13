@@ -101,17 +101,21 @@ Optional filter:
 
 - Only show chains that reach at least one **Entry Point**.
 
-### Entry Point Discovery (Spring Boot)
+### Entry Point Discovery (Java/Kotlin)
 
-Entry points are detected by scanning for:
+Entry points are detected by scanning for common framework patterns (best-effort):
 
-- `@RestController` / `@Controller` classes
-- Request mapping annotations on methods:
-  - `@RequestMapping`, `@GetMapping`, `@PostMapping`, etc.
+- Spring MVC: `@RestController` / `@Controller` + `@RequestMapping` / `@GetMapping` / ...
+- JAX-RS (Jersey/RESTEasy/Quarkus/Dropwizard): `@Path` + `@GET` / `@POST` / ... (also `@HttpMethod` meta-annotation)
+- Micronaut: `@Controller` + `@Get` / `@Post` / ...
+- Quarkus Vert.x routes: `@Route` / `@RouteFilter`
+- Servlet container: `HttpServlet#doGet/doPost/.../service`, `Filter#doFilter`, `Servlet#service`
+- WebSocket: `@ServerEndpoint` + `@OnOpen/@OnClose/@OnMessage/@OnError`
+- gRPC: `BindableService` implementations with `StreamObserver` methods
+- Dubbo: `@DubboService` (and Dubbo `@Service`) methods overriding interface methods (or `$invoke`)
+- JVM apps: `public static main(...)`
 
-Each entry point is recorded as:
-
-- `EntryPoint(methodId, httpMapping?, file, location)`
+Each entry point is currently recorded as a `MethodRef` id under call graph `entryPoints` (see `.idea/secrux/callgraph.json`).
 
 ### Audit Memo
 
@@ -156,4 +160,3 @@ Details: `secrux-intellij-plugin/docs/SECRUX_INTEGRATION.md`
 - Static call graph is approximate (dynamic dispatch, reflection, Lombok, proxies).
 - Kotlin/Java mixed projects may produce partially resolved nodes depending on indexing state.
 - Very large projects require incremental build + caching to avoid long blocking.
-

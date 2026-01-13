@@ -22,6 +22,7 @@ class ReportToSecruxDialog(
     initialBaseUrl: String,
     initialTaskId: String,
     initialIncludeSnippets: Boolean,
+    initialIncludeEnrichment: Boolean,
     initialTriggerAiReview: Boolean,
     initialWaitAiReview: Boolean
 ) : DialogWrapper(project) {
@@ -32,6 +33,8 @@ class ReportToSecruxDialog(
     private val rememberTokenCheckbox = JCheckBox(SecruxBundle.message("dialog.report.rememberToken"), true)
     private val includeSnippetsCheckbox =
         JCheckBox(SecruxBundle.message("dialog.report.includeSnippets"), initialIncludeSnippets)
+    private val includeEnrichmentCheckbox =
+        JCheckBox(SecruxBundle.message("dialog.report.includeEnrichment"), initialIncludeEnrichment)
     private val triggerAiReviewCheckbox =
         JCheckBox(SecruxBundle.message("dialog.report.triggerAiReview"), initialTriggerAiReview)
     private val waitAiReviewCheckbox =
@@ -50,6 +53,9 @@ class ReportToSecruxDialog(
 
     val includeSnippets: Boolean
         get() = includeSnippetsCheckbox.isSelected
+
+    val includeEnrichment: Boolean
+        get() = includeEnrichmentCheckbox.isSelected
 
     val severity: SecruxSeverity
         get() = (severityCombo.selectedItem as? SecruxSeverity) ?: SecruxSeverity.HIGH
@@ -150,6 +156,7 @@ class ReportToSecruxDialog(
         form.add(JBLabel(SecruxBundle.message("dialog.report.severity")))
         form.add(severityCombo)
         form.add(includeSnippetsCheckbox)
+        form.add(includeEnrichmentCheckbox)
         form.add(triggerAiReviewCheckbox)
         form.add(waitAiReviewCheckbox)
         form.add(JBLabel(SecruxBundle.message("dialog.report.token")))
