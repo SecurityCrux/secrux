@@ -131,6 +131,7 @@
     "dashboard": "总览",
     "projects": "项目",
     "tasks": "任务探查",
+    "intellijPlugin": "IntelliJ 插件",
     "rules": "规则",
     "findings": "漏洞",
     "sca": "SCA",
@@ -141,6 +142,47 @@
     "users": "用户管理",
     "roles": "角色管理",
     "tenant": "租户"
+  },
+  "idePlugins": {
+    "intellij": {
+      "title": "IntelliJ 插件",
+      "subtitle": "生成一个长期有效的访问令牌，并粘贴到 IntelliJ 插件设置中。",
+      "copyError": "复制失败，请手动选择文本复制。",
+      "connection": {
+        "title": "连接信息",
+        "baseUrl": "API 地址",
+        "headerHint": "在插件中使用以下请求头。"
+      },
+      "create": {
+        "title": "生成令牌",
+        "name": "令牌名称（可选）",
+        "namePlaceholder": "例如：MacBook 上的 IntelliJ",
+        "generate": "生成",
+        "generating": "生成中...",
+        "createError": "生成令牌失败。",
+        "token": "令牌（仅显示一次）",
+        "tokenHint": "请立即复制并保存，该令牌之后无法再次查看。",
+        "createdAt": "创建时间："
+      },
+      "tokens": {
+        "title": "我的令牌",
+        "loadError": "加载令牌失败。",
+        "empty": "暂无令牌。",
+        "unnamed": "未命名令牌",
+        "tokenHintLabel": "标识：",
+        "createdAt": "创建：",
+        "lastUsedAt": "最近使用：",
+        "status": "状态：",
+        "active": "有效",
+        "revoked": "已吊销",
+        "revoke": "吊销",
+        "revoking": "吊销中...",
+        "revokeError": "吊销令牌失败。"
+      },
+      "apis": {
+        "title": "插件接口"
+      }
+    }
   },
   "dashboard": {
     "welcome": "你好，{{name}}",
@@ -989,6 +1031,7 @@
   },
   "taskTypes": {
     "CODE_CHECK": "代码检查",
+    "IDE_AUDIT": "IDE 审计",
     "SCA_CHECK": "SCA 检查",
     "SECURITY_SCAN": "安全扫描",
     "SUPPLY_CHAIN": "供应链"
@@ -1165,6 +1208,8 @@
     "cancel": "取消",
     "save": "保存",
     "saving": "保存中...",
+    "copy": "复制",
+    "copied": "已复制",
     "edit": "编辑",
     "delete": "删除",
     "search": "搜索",

@@ -114,9 +114,26 @@ export type FindingReviewOpinionI18n = {
 
 export type RepositorySourceMode = "REMOTE" | "UPLOAD" | "MIXED"
 export type RepositoryScmType = "github" | "gitlab" | "gerrit" | "bitbucket" | "git"
-export type TaskType = "CODE_CHECK" | "SECURITY_SCAN" | "SUPPLY_CHAIN" | "SCA_CHECK"
+export type TaskType = "CODE_CHECK" | "SECURITY_SCAN" | "SUPPLY_CHAIN" | "SCA_CHECK" | "IDE_AUDIT"
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO"
 export type SourceRefType = "BRANCH" | "TAG" | "COMMIT" | "UPLOAD"
+
+export type IntellijTokenCreatedResponse = {
+  tokenId: string
+  name?: string | null
+  token: string
+  tokenHint: string
+  createdAt: string
+}
+
+export type IntellijTokenSummary = {
+  tokenId: string
+  name?: string | null
+  tokenHint: string
+  lastUsedAt?: string | null
+  revokedAt?: string | null
+  createdAt: string
+}
 
 export type Project = {
   projectId: string

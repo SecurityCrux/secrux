@@ -131,6 +131,7 @@
     "dashboard": "Dashboard",
     "projects": "Projects",
     "tasks": "Task Explorer",
+    "intellijPlugin": "IntelliJ Plugin",
     "rules": "Rules",
     "findings": "Findings",
     "sca": "SCA",
@@ -141,6 +142,47 @@
     "users": "User Management",
     "roles": "Role Management",
     "tenant": "Tenant"
+  },
+  "idePlugins": {
+    "intellij": {
+      "title": "IntelliJ Plugin",
+      "subtitle": "Generate a long-lived access token and paste it into the IntelliJ plugin settings.",
+      "copyError": "Failed to copy to clipboard.",
+      "connection": {
+        "title": "Connection",
+        "baseUrl": "API Base URL",
+        "headerHint": "Use this header in the plugin."
+      },
+      "create": {
+        "title": "Generate token",
+        "name": "Token name (optional)",
+        "namePlaceholder": "e.g. IntelliJ on MacBook",
+        "generate": "Generate",
+        "generating": "Generating...",
+        "createError": "Failed to generate token.",
+        "token": "Token (shown once)",
+        "tokenHint": "Copy this token now. You will not be able to view it again.",
+        "createdAt": "Created:"
+      },
+      "tokens": {
+        "title": "Your tokens",
+        "loadError": "Failed to load tokens.",
+        "empty": "No tokens yet.",
+        "unnamed": "Unnamed token",
+        "tokenHintLabel": "Hint:",
+        "createdAt": "Created:",
+        "lastUsedAt": "Last used:",
+        "status": "Status:",
+        "active": "Active",
+        "revoked": "Revoked",
+        "revoke": "Revoke",
+        "revoking": "Revoking...",
+        "revokeError": "Failed to revoke token."
+      },
+      "apis": {
+        "title": "Plugin APIs"
+      }
+    }
   },
   "dashboard": {
     "welcome": "Welcome, {{name}}",
@@ -989,6 +1031,7 @@
   },
   "taskTypes": {
     "CODE_CHECK": "Code check",
+    "IDE_AUDIT": "IDE audit",
     "SCA_CHECK": "SCA check",
     "SECURITY_SCAN": "Security scan",
     "SUPPLY_CHAIN": "Supply chain"
@@ -1165,6 +1208,8 @@
     "cancel": "Cancel",
     "save": "Save",
     "saving": "Saving...",
+    "copy": "Copy",
+    "copied": "Copied",
     "edit": "Edit",
     "delete": "Delete",
     "search": "Search",
