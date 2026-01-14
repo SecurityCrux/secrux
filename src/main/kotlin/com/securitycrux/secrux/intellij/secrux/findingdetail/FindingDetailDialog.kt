@@ -18,6 +18,7 @@ import com.intellij.ui.components.panels.VerticalLayout
 import com.intellij.util.ui.JBUI
 import com.securitycrux.secrux.intellij.callgraph.CallEdge
 import com.securitycrux.secrux.intellij.callgraph.CallGraphService
+import com.securitycrux.secrux.intellij.callgraph.callSiteFor
 import com.securitycrux.secrux.intellij.callgraph.MethodRef
 import com.securitycrux.secrux.intellij.i18n.SecruxBundle
 import com.securitycrux.secrux.intellij.valueflow.MethodSummary
@@ -303,7 +304,7 @@ class FindingDetailDialog(
         val stepRef = extractMethodRef(step)
         val nextRef = nextStep?.let { extractMethodRef(it) }
         if (graph != null && stepRef != null && nextRef != null) {
-            val callSite = graph.callSites[CallEdge(caller = stepRef, callee = nextRef)]
+            val callSite = graph.callSiteFor(CallEdge(caller = stepRef, callee = nextRef))
             if (callSite != null) {
                 OpenFileDescriptor(project, callSite.file, callSite.startOffset).navigate(true)
                 return

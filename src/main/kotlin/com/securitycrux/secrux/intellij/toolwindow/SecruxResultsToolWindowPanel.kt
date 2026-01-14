@@ -122,6 +122,7 @@ class SecruxResultsToolWindowPanel(
                         summaries = methodSummaries,
                         typeHierarchy = typeHierarchy,
                         frameworkModel = frameworkModel,
+                        pointsToIndex = callGraphService.getLastPointsToIndex(),
                     )
                 } else {
                     null

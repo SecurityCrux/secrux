@@ -41,6 +41,11 @@ import com.securitycrux.secrux.intellij.valueflow.InjectionPoint
 import com.securitycrux.secrux.intellij.valueflow.MethodSummary
 import com.securitycrux.secrux.intellij.valueflow.MethodSummaryIndex
 import com.securitycrux.secrux.intellij.valueflow.MethodSummaryStats
+import com.securitycrux.secrux.intellij.valueflow.PointsToAbstraction
+import com.securitycrux.secrux.intellij.valueflow.PointsToIndex
+import com.securitycrux.secrux.intellij.valueflow.PointsToIndexBuilder
+import com.securitycrux.secrux.intellij.valueflow.PointsToIndexMode
+import com.securitycrux.secrux.intellij.valueflow.PointsToOptions
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -140,6 +145,9 @@ class CallGraphService(
     @Volatile
     private var lastFrameworkModel: FrameworkModelIndex? = null
 
+    @Volatile
+    private var lastPointsToIndex: PointsToIndex? = null
+
     fun getLastGraph(): CallGraph? = lastGraph
 
     fun getLastTypeHierarchy(): TypeHierarchyIndex? = lastTypeHierarchy
@@ -147,6 +155,8 @@ class CallGraphService(
     fun getLastMethodSummaries(): MethodSummaryIndex? = lastMethodSummaries
 
     fun getLastFrameworkModel(): FrameworkModelIndex? = lastFrameworkModel
+
+    fun getLastPointsToIndex(): PointsToIndex? = lastPointsToIndex
 
     private fun fieldKey(
         base: String,
@@ -211,6 +221,39 @@ class CallGraphService(
                         persistMethodSummaries(result.methodSummaries, result.projectFingerprint)
                         persistFrameworkModel(result.frameworkModel, result.projectFingerprint)
 
+                        val settings = SecruxProjectSettings.getInstance(project).state
+                        val pointsToMode =
+                            runCatching { PointsToIndexMode.valueOf(settings.pointsToIndexMode.trim().uppercase()) }.getOrNull()
+                                ?: PointsToIndexMode.OFF
+                        if (pointsToMode == PointsToIndexMode.PRECOMPUTE) {
+                            indicator.checkCanceled()
+                            indicator.text = "Building points-to index"
+                            val abstraction =
+                                runCatching { PointsToAbstraction.valueOf(settings.pointsToAbstraction.trim().uppercase()) }.getOrNull()
+                                    ?: PointsToAbstraction.TYPE
+                            val options =
+                                PointsToOptions(
+                                    mode = pointsToMode,
+                                    abstraction = abstraction,
+                                    maxRootsPerToken = settings.pointsToMaxRootsPerToken,
+                                    maxBeanCandidates = settings.pointsToMaxBeanCandidates,
+                                    maxCallTargets = settings.pointsToMaxCallTargets,
+                                )
+                            val index =
+                                PointsToIndexBuilder.build(
+                                    graph = result.graph,
+                                    summaries = result.methodSummaries,
+                                    typeHierarchy = result.typeHierarchy,
+                                    frameworkModel = result.frameworkModel,
+                                    options = options,
+                                    indicator = indicator,
+                                )
+                            lastPointsToIndex = index
+                            persistPointsToIndex(index, result.projectFingerprint)
+                        } else {
+                            lastPointsToIndex = null
+                        }
+
                         ApplicationManager.getApplication().invokeLater {
                             project.messageBus.syncPublisher(CallGraphListener.TOPIC).onCallGraphUpdated(result.graph)
                         }
@@ -247,6 +290,16 @@ class CallGraphService(
                     lastTypeHierarchy = typeHierarchy
                     lastMethodSummaries = methodSummaries
                     lastFrameworkModel = frameworkModel
+                    val settings = SecruxProjectSettings.getInstance(project).state
+                    val pointsToMode =
+                        runCatching { PointsToIndexMode.valueOf(settings.pointsToIndexMode.trim().uppercase()) }.getOrNull()
+                            ?: PointsToIndexMode.OFF
+                    lastPointsToIndex =
+                        if (pointsToMode == PointsToIndexMode.PRECOMPUTE) {
+                            loadPointsToIndex(expectedFingerprint = expectedFingerprint)
+                        } else {
+                            null
+                        }
                     ApplicationManager.getApplication().invokeLater {
                         project.messageBus.syncPublisher(CallGraphListener.TOPIC).onCallGraphUpdated(graph)
                     }
@@ -267,9 +320,15 @@ class CallGraphService(
         cacheFile()?.let { file ->
             runCatching { file.delete() }
         }
+        callGraphShardsDir()?.let { dir ->
+            runCatching { dir.deleteRecursively() }
+        }
         lastGraph = null
         typeHierarchyCacheFile()?.let { file ->
             runCatching { file.delete() }
+        }
+        typeHierarchyShardsDir()?.let { dir ->
+            runCatching { dir.deleteRecursively() }
         }
         lastTypeHierarchy = null
         methodSummaryCacheFile()?.let { file ->
@@ -282,7 +341,17 @@ class CallGraphService(
         frameworkModelCacheFile()?.let { file ->
             runCatching { file.delete() }
         }
+        frameworkModelShardsDir()?.let { dir ->
+            runCatching { dir.deleteRecursively() }
+        }
         lastFrameworkModel = null
+        pointsToCacheFile()?.let { file ->
+            runCatching { file.delete() }
+        }
+        pointsToShardsDir()?.let { dir ->
+            runCatching { dir.deleteRecursively() }
+        }
+        lastPointsToIndex = null
         ApplicationManager.getApplication().invokeLater {
             project.messageBus.syncPublisher(CallGraphListener.TOPIC).onCallGraphUpdated(null)
         }
@@ -330,9 +399,16 @@ class CallGraphService(
         val file = cacheFile() ?: return
         runCatching {
             file.parentFile?.mkdirs()
-            val payload =
+            val shardDir = callGraphShardsDir()
+            val shardSpec = shardCallGraph(graph)
+            if (shardDir != null) {
+                runCatching { shardDir.deleteRecursively() }
+                shardDir.mkdirs()
+            }
+
+            val manifest =
                 buildJsonObject {
-                    put("formatVersion", 3)
+                    put("formatVersion", 5)
                     projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
                     put("generatedAtEpochMs", System.currentTimeMillis())
                     putJsonObject("stats") {
@@ -341,63 +417,92 @@ class CallGraphService(
                         put("callEdges", graph.stats.callEdges)
                         put("unresolvedCalls", graph.stats.unresolvedCalls)
                     }
-                    putJsonArray("methods") {
-                        for ((ref, loc) in graph.methods) {
-                            val relPath = toProjectRelativePath(loc.file.path)
-                            add(
-                                buildJsonObject {
-                                    put("id", ref.id)
-                                    put("filePath", relPath)
-                                    put("startOffset", loc.startOffset)
-                                }
-                            )
-                        }
-                    }
-                    putJsonArray("outgoing") {
-                        for ((caller, callees) in graph.outgoing) {
-                            add(
-                                buildJsonObject {
-                                    put("caller", caller.id)
-                                    putJsonArray("callees") {
-                                        for (callee in callees) {
-                                            add(JsonPrimitive(callee.id))
-                                        }
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    putJsonArray("edgeKinds") {
-                        for ((edge, kind) in graph.edgeKinds) {
-                            add(
-                                buildJsonObject {
-                                    put("caller", edge.caller.id)
-                                    put("callee", edge.callee.id)
-                                    put("kind", kind.name)
-                                }
-                            )
-                        }
-                    }
-                    putJsonArray("callSites") {
-                        for ((edge, loc) in graph.callSites) {
-                            val relPath = toProjectRelativePath(loc.file.path)
-                            add(
-                                buildJsonObject {
-                                    put("caller", edge.caller.id)
-                                    put("callee", edge.callee.id)
-                                    put("filePath", relPath)
-                                    put("startOffset", loc.startOffset)
-                                }
-                            )
-                        }
-                    }
                     putJsonArray("entryPoints") {
                         for (entry in graph.entryPoints) {
                             add(JsonPrimitive(entry.id))
                         }
                     }
+                    putJsonArray("shards") {
+                        for (shard in shardSpec) {
+                            add(
+                                buildJsonObject {
+                                    put("key", shard.key)
+                                    put("file", shard.file)
+                                    put("methodCount", shard.methods.size)
+                                    put("outgoingCount", shard.outgoing.size)
+                                    put("edgeKindsCount", shard.edgeKinds.size)
+                                    put("callSitesCount", shard.callSites.size)
+                                }
+                            )
+                        }
+                    }
                 }
-            file.writeText(payload.toString(), Charsets.UTF_8)
+
+            for (shard in shardSpec) {
+                val target =
+                    shardDir?.let { File(it, shard.file.substringAfterLast('/')) }
+                        ?: File(file.parentFile, shard.file)
+                target.parentFile?.mkdirs()
+                val payload =
+                    buildJsonObject {
+                        put("formatVersion", 1)
+                        projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
+                        put("generatedAtEpochMs", System.currentTimeMillis())
+                        putJsonArray("methods") {
+                            for ((ref, loc) in shard.methods) {
+                                val relPath = toProjectRelativePath(loc.file.path)
+                                add(
+                                    buildJsonObject {
+                                        put("id", ref.id)
+                                        put("filePath", relPath)
+                                        put("startOffset", loc.startOffset)
+                                    }
+                                )
+                            }
+                        }
+                        putJsonArray("outgoing") {
+                            for ((caller, callees) in shard.outgoing) {
+                                add(
+                                    buildJsonObject {
+                                        put("caller", caller.id)
+                                        putJsonArray("callees") {
+                                            for (callee in callees) {
+                                                add(JsonPrimitive(callee.id))
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        putJsonArray("edgeKinds") {
+                            for ((edge, kind) in shard.edgeKinds) {
+                                add(
+                                    buildJsonObject {
+                                        put("caller", edge.caller.id)
+                                        put("callee", edge.callee.id)
+                                        put("kind", kind.name)
+                                    }
+                                )
+                            }
+                        }
+                        putJsonArray("callSites") {
+                            for ((edge, loc) in shard.callSites) {
+                                val relPath = toProjectRelativePath(loc.file.path)
+                                add(
+                                    buildJsonObject {
+                                        put("caller", edge.caller.id)
+                                        put("callee", edge.callee.id)
+                                        put("filePath", relPath)
+                                        put("startOffset", loc.startOffset)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                target.writeText(payload.toString(), Charsets.UTF_8)
+            }
+
+            file.writeText(manifest.toString(), Charsets.UTF_8)
         }.onFailure { e ->
             log.warn("Failed to persist call graph", e)
         }
@@ -407,9 +512,16 @@ class CallGraphService(
         val file = typeHierarchyCacheFile() ?: return
         runCatching {
             file.parentFile?.mkdirs()
-            val payload =
+            val shardDir = typeHierarchyShardsDir()
+            val shardSpec = shardTypeHierarchy(index)
+            if (shardDir != null) {
+                runCatching { shardDir.deleteRecursively() }
+                shardDir.mkdirs()
+            }
+
+            val manifest =
                 buildJsonObject {
-                    put("formatVersion", 1)
+                    put("formatVersion", 2)
                     projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
                     put("generatedAtEpochMs", System.currentTimeMillis())
                     putJsonObject("stats") {
@@ -418,19 +530,45 @@ class CallGraphService(
                         put("implEdges", index.stats.implEdges)
                         put("exteEdges", index.stats.exteEdges)
                     }
-                    putJsonArray("edges") {
-                        for (edge in index.edges) {
+                    putJsonArray("shards") {
+                        for (shard in shardSpec) {
                             add(
                                 buildJsonObject {
-                                    put("from", edge.from)
-                                    put("to", edge.to)
-                                    put("kind", edge.kind.name)
+                                    put("key", shard.key)
+                                    put("file", shard.file)
+                                    put("edgeCount", shard.edges.size)
                                 }
                             )
                         }
                     }
                 }
-            file.writeText(payload.toString(), Charsets.UTF_8)
+
+            for (shard in shardSpec) {
+                val target =
+                    shardDir?.let { File(it, shard.file.substringAfterLast('/')) }
+                        ?: File(file.parentFile, shard.file)
+                target.parentFile?.mkdirs()
+                val payload =
+                    buildJsonObject {
+                        put("formatVersion", 1)
+                        projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
+                        put("generatedAtEpochMs", System.currentTimeMillis())
+                        putJsonArray("edges") {
+                            for (edge in shard.edges) {
+                                add(
+                                    buildJsonObject {
+                                        put("from", edge.from)
+                                        put("to", edge.to)
+                                        put("kind", edge.kind.name)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                target.writeText(payload.toString(), Charsets.UTF_8)
+            }
+
+            file.writeText(manifest.toString(), Charsets.UTF_8)
         }.onFailure { e ->
             log.warn("Failed to persist type hierarchy", e)
         }
@@ -559,9 +697,16 @@ class CallGraphService(
         val file = frameworkModelCacheFile() ?: return
         runCatching {
             file.parentFile?.mkdirs()
-            val payload =
+            val shardDir = frameworkModelShardsDir()
+            val shardSpec = shardFrameworkModel(index)
+            if (shardDir != null) {
+                runCatching { shardDir.deleteRecursively() }
+                shardDir.mkdirs()
+            }
+
+            val manifest =
                 buildJsonObject {
-                    put("formatVersion", 2)
+                    put("formatVersion", 3)
                     projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
                     put("generatedAtEpochMs", System.currentTimeMillis())
                     putJsonObject("stats") {
@@ -570,39 +715,194 @@ class CallGraphService(
                         put("classesWithBeans", index.stats.classesWithBeans)
                         put("classesWithInjections", index.stats.classesWithInjections)
                     }
-                    putJsonArray("beans") {
-                        for (bean in index.beans) {
+                    putJsonArray("shards") {
+                        for (shard in shardSpec) {
                             add(
                                 buildJsonObject {
-                                    put("typeFqn", bean.typeFqn)
-                                    put("kind", bean.kind.name)
-                                    bean.source?.let { put("source", it) }
-                                    bean.filePath?.let { put("filePath", it) }
-                                    bean.startOffset?.let { put("startOffset", it) }
-                                }
-                            )
-                        }
-                    }
-                    putJsonArray("injections") {
-                        for (inj in index.injections) {
-                            add(
-                                buildJsonObject {
-                                    put("ownerClassFqn", inj.ownerClassFqn)
-                                    put("kind", inj.kind.name)
-                                    put("targetTypeFqn", inj.targetTypeFqn)
-                                    inj.name?.let { put("name", it) }
-                                    inj.methodId?.let { put("methodId", it) }
-                                    inj.paramIndex?.let { put("paramIndex", it) }
-                                    inj.filePath?.let { put("filePath", it) }
-                                    inj.startOffset?.let { put("startOffset", it) }
+                                    put("key", shard.key)
+                                    put("file", shard.file)
+                                    put("beansCount", shard.beans.size)
+                                    put("injectionsCount", shard.injections.size)
                                 }
                             )
                         }
                     }
                 }
-            file.writeText(payload.toString(), Charsets.UTF_8)
+
+            for (shard in shardSpec) {
+                val target =
+                    shardDir?.let { File(it, shard.file.substringAfterLast('/')) }
+                        ?: File(file.parentFile, shard.file)
+                target.parentFile?.mkdirs()
+                val payload =
+                    buildJsonObject {
+                        put("formatVersion", 1)
+                        projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
+                        put("generatedAtEpochMs", System.currentTimeMillis())
+                        putJsonArray("beans") {
+                            for (bean in shard.beans) {
+                                add(
+                                    buildJsonObject {
+                                        put("typeFqn", bean.typeFqn)
+                                        put("kind", bean.kind.name)
+                                        bean.source?.let { put("source", it) }
+                                        bean.filePath?.let { put("filePath", it) }
+                                        bean.startOffset?.let { put("startOffset", it) }
+                                    }
+                                )
+                            }
+                        }
+                        putJsonArray("injections") {
+                            for (inj in shard.injections) {
+                                add(
+                                    buildJsonObject {
+                                        put("ownerClassFqn", inj.ownerClassFqn)
+                                        put("kind", inj.kind.name)
+                                        put("targetTypeFqn", inj.targetTypeFqn)
+                                        inj.name?.let { put("name", it) }
+                                        inj.methodId?.let { put("methodId", it) }
+                                        inj.paramIndex?.let { put("paramIndex", it) }
+                                        inj.filePath?.let { put("filePath", it) }
+                                        inj.startOffset?.let { put("startOffset", it) }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                target.writeText(payload.toString(), Charsets.UTF_8)
+            }
+
+            file.writeText(manifest.toString(), Charsets.UTF_8)
         }.onFailure { e ->
             log.warn("Failed to persist framework model", e)
+        }
+    }
+
+    private data class PointsToShard(
+        val key: String,
+        val file: String,
+        val entries: List<Triple<MethodRef, String, com.securitycrux.secrux.intellij.valueflow.PointsToEntry>>,
+    )
+
+    private fun shardPointsToIndex(index: PointsToIndex, maxShards: Int = 200): List<PointsToShard> {
+        if (index.byMethod.isEmpty()) return emptyList()
+        val byShard = linkedMapOf<String, MutableList<Triple<MethodRef, String, com.securitycrux.secrux.intellij.valueflow.PointsToEntry>>>()
+        for ((method, entries) in index.byMethod) {
+            val key = shardKeyForMethod(method)
+            val list = byShard.getOrPut(key) { mutableListOf() }
+            for ((token, entry) in entries) {
+                list.add(Triple(method, token, entry))
+            }
+        }
+
+        val ordered =
+            byShard.entries
+                .sortedWith(compareByDescending<Map.Entry<String, MutableList<Triple<MethodRef, String, com.securitycrux.secrux.intellij.valueflow.PointsToEntry>>>> { it.value.size }.thenBy { it.key })
+                .map { it.key to it.value.toList() }
+                .toList()
+
+        val safeMaxShards = maxShards.coerceIn(1, 500)
+        val capped =
+            if (ordered.size <= safeMaxShards) {
+                ordered
+            } else {
+                val top = ordered.take(safeMaxShards - 1)
+                val rest = ordered.drop(safeMaxShards - 1)
+                val merged = rest.flatMap { it.second }
+                top + listOf("_OTHER" to merged)
+            }
+
+        val dirPrefix = "pointsto"
+        return capped.map { (key, entries) ->
+            val fileName = "pointsto_${sanitizeShardKey(key)}.json"
+            PointsToShard(
+                key = key,
+                file = "$dirPrefix/$fileName",
+                entries = entries,
+            )
+        }
+    }
+
+    private fun persistPointsToIndex(index: PointsToIndex, projectFingerprint: String?) {
+        val file = pointsToCacheFile() ?: return
+        runCatching {
+            file.parentFile?.mkdirs()
+            val shardDir = pointsToShardsDir()
+            val shardSpec = shardPointsToIndex(index)
+            if (shardDir != null) {
+                runCatching { shardDir.deleteRecursively() }
+                shardDir.mkdirs()
+            }
+
+            val manifest =
+                buildJsonObject {
+                    put("formatVersion", 1)
+                    projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
+                    put("generatedAtEpochMs", System.currentTimeMillis())
+                    putJsonObject("options") {
+                        put("mode", index.options.mode.name)
+                        put("abstraction", index.options.abstraction.name)
+                        put("maxRootsPerToken", index.options.maxRootsPerToken)
+                        put("maxBeanCandidates", index.options.maxBeanCandidates)
+                        put("maxCallTargets", index.options.maxCallTargets)
+                    }
+                    putJsonObject("stats") {
+                        put("entries", index.stats.entries)
+                        put("methods", index.stats.methods)
+                        put("rootDictSize", index.stats.rootDictSize)
+                        put("edges", index.stats.edges)
+                        put("buildMillis", index.stats.buildMillis)
+                        put("truncatedEntries", index.stats.truncatedEntries)
+                    }
+                    putJsonArray("rootDict") {
+                        for (root in index.rootDict) {
+                            add(JsonPrimitive(root))
+                        }
+                    }
+                    putJsonArray("shards") {
+                        for (shard in shardSpec) {
+                            add(
+                                buildJsonObject {
+                                    put("key", shard.key)
+                                    put("file", shard.file)
+                                    put("entryCount", shard.entries.size)
+                                }
+                            )
+                        }
+                    }
+                }
+
+            for (shard in shardSpec) {
+                val target =
+                    shardDir?.let { File(it, shard.file.substringAfterLast('/')) }
+                        ?: File(file.parentFile, shard.file)
+                target.parentFile?.mkdirs()
+                val payload =
+                    buildJsonObject {
+                        put("formatVersion", 1)
+                        projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
+                        put("generatedAtEpochMs", System.currentTimeMillis())
+                        putJsonArray("entries") {
+                            for ((method, token, entry) in shard.entries) {
+                                add(
+                                    buildJsonObject {
+                                        put("methodId", method.id)
+                                        put("token", token)
+                                        put("truncated", entry.truncated)
+                                        putJsonArray("rootIds") {
+                                            for (id in entry.rootIds) add(JsonPrimitive(id))
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                target.writeText(payload.toString(), Charsets.UTF_8)
+            }
+
+            file.writeText(manifest.toString(), Charsets.UTF_8)
+        }.onFailure { e ->
+            log.warn("Failed to persist points-to index", e)
         }
     }
 
@@ -619,51 +919,44 @@ class CallGraphService(
         val methods =
             linkedMapOf<MethodRef, MethodLocation>()
 
-        val methodsArray = root["methods"]?.jsonArray.orEmpty()
-        for (entry in methodsArray) {
-            val obj = entry.jsonObject
-            val id = obj["id"]?.jsonPrimitive?.content ?: continue
-            val filePath = obj["filePath"]?.jsonPrimitive?.content ?: continue
-            val startOffset = obj["startOffset"]?.jsonPrimitive?.int ?: 0
-            val ref = MethodRef.fromIdOrNull(id) ?: continue
-            val vf = LocalFileSystem.getInstance().findFileByPath("$basePath/$filePath") ?: continue
-            methods[ref] = MethodLocation(file = vf, startOffset = startOffset)
-        }
-
         val outgoing =
             linkedMapOf<MethodRef, MutableSet<MethodRef>>()
         val incoming =
             linkedMapOf<MethodRef, MutableSet<MethodRef>>()
 
-        val outgoingArray = root["outgoing"]?.jsonArray.orEmpty()
-        for (entry in outgoingArray) {
-            val obj = entry.jsonObject
-            val callerId = obj["caller"]?.jsonPrimitive?.content ?: continue
-            val caller = MethodRef.fromIdOrNull(callerId) ?: continue
-            val callees = obj["callees"]?.jsonArray.orEmpty()
-            for (calleeElem in callees) {
-                val calleeId = calleeElem.jsonPrimitive.content
-                val callee = MethodRef.fromIdOrNull(calleeId) ?: continue
-                outgoing.getOrPut(caller) { linkedSetOf() }.add(callee)
-                incoming.getOrPut(callee) { linkedSetOf() }.add(caller)
-            }
-        }
-
         val edgeKinds =
             linkedMapOf<CallEdge, CallEdgeKind>()
-        val edgeKindsArray = root["edgeKinds"]?.jsonArray
-        if (edgeKindsArray != null) {
-            for (entry in edgeKindsArray) {
+
+        val callSites =
+            linkedMapOf<CallEdge, MutableList<CallSiteLocation>>()
+
+        val shards = root["shards"]?.jsonArray
+        if (shards != null) {
+            val shardDir = callGraphShardsDir()
+            for (entry in shards) {
                 val obj = entry.jsonObject
-                val callerId = obj["caller"]?.jsonPrimitive?.content ?: continue
-                val calleeId = obj["callee"]?.jsonPrimitive?.content ?: continue
-                val kindStr = obj["kind"]?.jsonPrimitive?.content ?: continue
-                val caller = MethodRef.fromIdOrNull(callerId) ?: continue
-                val callee = MethodRef.fromIdOrNull(calleeId) ?: continue
-                val kind = runCatching { CallEdgeKind.valueOf(kindStr) }.getOrNull() ?: continue
-                edgeKinds.putIfAbsent(CallEdge(caller = caller, callee = callee), kind)
+                val rel = obj["file"]?.jsonPrimitive?.content ?: continue
+                val resolved =
+                    shardDir?.let { File(it, rel.substringAfterLast('/')) }
+                        ?: File(file.parentFile, rel)
+                if (!resolved.exists()) return null
+                val shardBody = resolved.readText(Charsets.UTF_8)
+                val shardRoot = json.parseToJsonElement(shardBody).jsonObject
+                val shardFingerprint = shardRoot["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+                if (expectedFingerprint != null && shardFingerprint != null && shardFingerprint != expectedFingerprint) return null
+
+                readCallGraphMethodEntries(shardRoot["methods"]?.jsonArray.orEmpty(), basePath, methods)
+                readCallGraphOutgoingEntries(shardRoot["outgoing"]?.jsonArray.orEmpty(), outgoing, incoming)
+                readCallGraphEdgeKindEntries(shardRoot["edgeKinds"]?.jsonArray.orEmpty(), edgeKinds)
+                readCallGraphCallSiteEntries(shardRoot["callSites"]?.jsonArray.orEmpty(), basePath, callSites)
             }
+        } else {
+            readCallGraphMethodEntries(root["methods"]?.jsonArray.orEmpty(), basePath, methods)
+            readCallGraphOutgoingEntries(root["outgoing"]?.jsonArray.orEmpty(), outgoing, incoming)
+            readCallGraphEdgeKindEntries(root["edgeKinds"]?.jsonArray.orEmpty(), edgeKinds)
+            readCallGraphCallSiteEntries(root["callSites"]?.jsonArray.orEmpty(), basePath, callSites)
         }
+
         if (edgeKinds.isEmpty()) {
             for ((caller, callees) in outgoing) {
                 for (callee in callees) {
@@ -676,21 +969,6 @@ class CallGraphService(
                     edgeKinds.putIfAbsent(CallEdge(caller = caller, callee = callee), CallEdgeKind.CALL)
                 }
             }
-        }
-
-        val callSites =
-            linkedMapOf<CallEdge, CallSiteLocation>()
-        val callSitesArray = root["callSites"]?.jsonArray.orEmpty()
-        for (entry in callSitesArray) {
-            val obj = entry.jsonObject
-            val callerId = obj["caller"]?.jsonPrimitive?.content ?: continue
-            val calleeId = obj["callee"]?.jsonPrimitive?.content ?: continue
-            val filePath = obj["filePath"]?.jsonPrimitive?.content ?: continue
-            val startOffset = obj["startOffset"]?.jsonPrimitive?.int ?: 0
-            val caller = MethodRef.fromIdOrNull(callerId) ?: continue
-            val callee = MethodRef.fromIdOrNull(calleeId) ?: continue
-            val vf = LocalFileSystem.getInstance().findFileByPath("$basePath/$filePath") ?: continue
-            callSites.putIfAbsent(CallEdge(caller = caller, callee = callee), CallSiteLocation(file = vf, startOffset = startOffset))
         }
 
         val entryPoints =
@@ -716,11 +994,16 @@ class CallGraphService(
                 )
             }
 
+        val normalizedCallSites =
+            callSites.mapValues { (_, locs) ->
+                locs.distinctBy { it.startOffset }.sortedBy { it.startOffset }
+            }
+
         return CallGraph(
             methods = methods.toMap(),
             outgoing = outgoing.mapValues { (_, v) -> v.toSet() },
             incoming = incoming.mapValues { (_, v) -> v.toSet() },
-            callSites = callSites.toMap(),
+            callSites = normalizedCallSites,
             edgeKinds = edgeKinds.toMap(),
             entryPoints = entryPoints,
             stats = stats
@@ -736,17 +1019,26 @@ class CallGraphService(
         val cachedFingerprint = root["projectFingerprint"]?.jsonPrimitive?.contentOrNull
         if (expectedFingerprint != null && cachedFingerprint != null && cachedFingerprint != expectedFingerprint) return null
 
-        val edges =
-            root["edges"]?.jsonArray.orEmpty()
-                .mapNotNull { elem ->
-                    val obj = elem.jsonObject
-                    val from = obj["from"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val to = obj["to"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kindStr = obj["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kind = runCatching { TypeEdgeKind.valueOf(kindStr) }.getOrNull() ?: return@mapNotNull null
-                    TypeHierarchyEdge(from = from, to = to, kind = kind)
-                }
-                .toSet()
+        val edges = linkedSetOf<TypeHierarchyEdge>()
+        val shards = root["shards"]?.jsonArray
+        if (shards != null) {
+            val shardDir = typeHierarchyShardsDir()
+            for (entry in shards) {
+                val obj = entry.jsonObject
+                val rel = obj["file"]?.jsonPrimitive?.content ?: continue
+                val resolved =
+                    shardDir?.let { File(it, rel.substringAfterLast('/')) }
+                        ?: File(file.parentFile, rel)
+                if (!resolved.exists()) return null
+                val shardBody = resolved.readText(Charsets.UTF_8)
+                val shardRoot = json.parseToJsonElement(shardBody).jsonObject
+                val shardFingerprint = shardRoot["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+                if (expectedFingerprint != null && shardFingerprint != null && shardFingerprint != expectedFingerprint) return null
+                readTypeHierarchyEdgeEntries(shardRoot["edges"]?.jsonArray.orEmpty(), edges)
+            }
+        } else {
+            readTypeHierarchyEdgeEntries(root["edges"]?.jsonArray.orEmpty(), edges)
+        }
 
         val statsObj = root["stats"]?.jsonObject
         val stats =
@@ -770,7 +1062,7 @@ class CallGraphService(
                 )
             }
 
-        return TypeHierarchyIndex(edges = edges, stats = stats)
+        return TypeHierarchyIndex(edges = edges.toSet(), stats = stats)
     }
 
     private fun loadMethodSummaries(expectedFingerprint: String? = null): MethodSummaryIndex? {
@@ -859,49 +1151,29 @@ class CallGraphService(
         val cachedFingerprint = root["projectFingerprint"]?.jsonPrimitive?.contentOrNull
         if (expectedFingerprint != null && cachedFingerprint != null && cachedFingerprint != expectedFingerprint) return null
 
-        val beans =
-            root["beans"]?.jsonArray.orEmpty()
-                .mapNotNull { elem ->
-                    val obj = elem.jsonObject
-                    val typeFqn = obj["typeFqn"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kindStr = obj["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kind = runCatching { BeanKind.valueOf(kindStr) }.getOrNull() ?: return@mapNotNull null
-                    val source = obj["source"]?.jsonPrimitive?.contentOrNull
-                    val filePath = obj["filePath"]?.jsonPrimitive?.contentOrNull
-                    val startOffset = obj["startOffset"]?.jsonPrimitive?.int
-                    BeanDefinition(
-                        typeFqn = typeFqn,
-                        kind = kind,
-                        source = source,
-                        filePath = filePath,
-                        startOffset = startOffset,
-                    )
-                }
-
-        val injections =
-            root["injections"]?.jsonArray.orEmpty()
-                .mapNotNull { elem ->
-                    val obj = elem.jsonObject
-                    val ownerClassFqn = obj["ownerClassFqn"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kindStr = obj["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kind = runCatching { InjectionKind.valueOf(kindStr) }.getOrNull() ?: return@mapNotNull null
-                    val targetTypeFqn = obj["targetTypeFqn"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val name = obj["name"]?.jsonPrimitive?.contentOrNull
-                    val methodId = obj["methodId"]?.jsonPrimitive?.contentOrNull
-                    val paramIndex = obj["paramIndex"]?.jsonPrimitive?.int
-                    val filePath = obj["filePath"]?.jsonPrimitive?.contentOrNull
-                    val startOffset = obj["startOffset"]?.jsonPrimitive?.int
-                    InjectionPoint(
-                        ownerClassFqn = ownerClassFqn,
-                        kind = kind,
-                        targetTypeFqn = targetTypeFqn,
-                        name = name,
-                        methodId = methodId,
-                        paramIndex = paramIndex,
-                        filePath = filePath,
-                        startOffset = startOffset,
-                    )
-                }
+        val beans = linkedSetOf<BeanDefinition>()
+        val injections = mutableListOf<InjectionPoint>()
+        val shards = root["shards"]?.jsonArray
+        if (shards != null) {
+            val shardDir = frameworkModelShardsDir()
+            for (entry in shards) {
+                val obj = entry.jsonObject
+                val rel = obj["file"]?.jsonPrimitive?.content ?: continue
+                val resolved =
+                    shardDir?.let { File(it, rel.substringAfterLast('/')) }
+                        ?: File(file.parentFile, rel)
+                if (!resolved.exists()) return null
+                val shardBody = resolved.readText(Charsets.UTF_8)
+                val shardRoot = json.parseToJsonElement(shardBody).jsonObject
+                val shardFingerprint = shardRoot["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+                if (expectedFingerprint != null && shardFingerprint != null && shardFingerprint != expectedFingerprint) return null
+                readFrameworkBeanEntries(shardRoot["beans"]?.jsonArray.orEmpty(), beans)
+                readFrameworkInjectionEntries(shardRoot["injections"]?.jsonArray.orEmpty(), injections)
+            }
+        } else {
+            readFrameworkBeanEntries(root["beans"]?.jsonArray.orEmpty(), beans)
+            readFrameworkInjectionEntries(root["injections"]?.jsonArray.orEmpty(), injections)
+        }
 
         val statsObj = root["stats"]?.jsonObject
         val stats =
@@ -921,7 +1193,117 @@ class CallGraphService(
                 )
             }
 
-        return FrameworkModelIndex(beans = beans, injections = injections, stats = stats)
+        return FrameworkModelIndex(beans = beans.toList(), injections = injections.toList(), stats = stats)
+    }
+
+    private fun loadPointsToIndex(expectedFingerprint: String? = null): PointsToIndex? {
+        val file = pointsToCacheFile() ?: return null
+        if (!file.exists()) return null
+
+        val body = file.readText(Charsets.UTF_8)
+        val root = json.parseToJsonElement(body).jsonObject
+        val cachedFingerprint = root["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+        if (expectedFingerprint != null && cachedFingerprint != null && cachedFingerprint != expectedFingerprint) return null
+
+        fun parseMode(value: String?): PointsToIndexMode =
+            value?.trim()?.uppercase()?.let { runCatching { PointsToIndexMode.valueOf(it) }.getOrNull() }
+                ?: PointsToIndexMode.PRECOMPUTE
+
+        fun parseAbstraction(value: String?): PointsToAbstraction =
+            value?.trim()?.uppercase()?.let { runCatching { PointsToAbstraction.valueOf(it) }.getOrNull() }
+                ?: PointsToAbstraction.TYPE
+
+        val optionsObj = root["options"]?.jsonObject
+        val options =
+            if (optionsObj != null) {
+                PointsToOptions(
+                    mode = parseMode(optionsObj["mode"]?.jsonPrimitive?.contentOrNull),
+                    abstraction = parseAbstraction(optionsObj["abstraction"]?.jsonPrimitive?.contentOrNull),
+                    maxRootsPerToken = optionsObj["maxRootsPerToken"]?.jsonPrimitive?.int ?: 60,
+                    maxBeanCandidates = optionsObj["maxBeanCandidates"]?.jsonPrimitive?.int ?: 25,
+                    maxCallTargets = optionsObj["maxCallTargets"]?.jsonPrimitive?.int ?: 50,
+                )
+            } else {
+                PointsToOptions(
+                    mode = PointsToIndexMode.PRECOMPUTE,
+                    abstraction = PointsToAbstraction.TYPE,
+                    maxRootsPerToken = 60,
+                    maxBeanCandidates = 25,
+                    maxCallTargets = 50,
+                )
+            }
+
+        val rootDict =
+            root["rootDict"]?.jsonArray.orEmpty()
+                .mapNotNull { it.jsonPrimitive.contentOrNull }
+                .ifEmpty { listOf(PointsToIndex.ROOT_UNKNOWN) }
+
+        val out = linkedMapOf<MethodRef, MutableMap<String, com.securitycrux.secrux.intellij.valueflow.PointsToEntry>>()
+
+        fun readEntries(entriesArray: List<kotlinx.serialization.json.JsonElement>) {
+            for (entryElem in entriesArray) {
+                val obj = entryElem.jsonObject
+                val methodId = obj["methodId"]?.jsonPrimitive?.contentOrNull ?: continue
+                val token = obj["token"]?.jsonPrimitive?.contentOrNull ?: continue
+                val ref = MethodRef.fromIdOrNull(methodId) ?: continue
+                val truncated = obj["truncated"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                val ids =
+                    obj["rootIds"]?.jsonArray.orEmpty()
+                        .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
+                        .toIntArray()
+                out.getOrPut(ref) { linkedMapOf() }[token] =
+                    com.securitycrux.secrux.intellij.valueflow.PointsToEntry(rootIds = ids, truncated = truncated)
+            }
+        }
+
+        val shards = root["shards"]?.jsonArray
+        if (shards != null) {
+            val shardDir = pointsToShardsDir()
+            for (entry in shards) {
+                val obj = entry.jsonObject
+                val rel = obj["file"]?.jsonPrimitive?.content ?: continue
+                val resolved =
+                    shardDir?.let { File(it, rel.substringAfterLast('/')) }
+                        ?: File(file.parentFile, rel)
+                if (!resolved.exists()) return null
+                val shardBody = resolved.readText(Charsets.UTF_8)
+                val shardRoot = json.parseToJsonElement(shardBody).jsonObject
+                val shardFingerprint = shardRoot["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+                if (expectedFingerprint != null && shardFingerprint != null && shardFingerprint != expectedFingerprint) return null
+                readEntries(shardRoot["entries"]?.jsonArray.orEmpty())
+            }
+        } else {
+            readEntries(root["entries"]?.jsonArray.orEmpty())
+        }
+
+        val statsObj = root["stats"]?.jsonObject
+        val stats =
+            if (statsObj != null) {
+                com.securitycrux.secrux.intellij.valueflow.PointsToStats(
+                    entries = statsObj["entries"]?.jsonPrimitive?.int ?: out.values.sumOf { it.size },
+                    methods = statsObj["methods"]?.jsonPrimitive?.int ?: out.size,
+                    rootDictSize = statsObj["rootDictSize"]?.jsonPrimitive?.int ?: rootDict.size,
+                    edges = statsObj["edges"]?.jsonPrimitive?.int ?: 0,
+                    buildMillis = statsObj["buildMillis"]?.jsonPrimitive?.long ?: 0,
+                    truncatedEntries = statsObj["truncatedEntries"]?.jsonPrimitive?.int ?: 0,
+                )
+            } else {
+                com.securitycrux.secrux.intellij.valueflow.PointsToStats(
+                    entries = out.values.sumOf { it.size },
+                    methods = out.size,
+                    rootDictSize = rootDict.size,
+                    edges = 0,
+                    buildMillis = 0,
+                    truncatedEntries = 0,
+                )
+            }
+
+        return PointsToIndex(
+            byMethod = out.mapValues { (_, v) -> v.toMap() },
+            rootDict = rootDict,
+            options = options,
+            stats = stats,
+        )
     }
 
     private fun cacheFile(): File? {
@@ -929,9 +1311,19 @@ class CallGraphService(
         return File(basePath, ".idea/secrux/callgraph.json")
     }
 
+    private fun callGraphShardsDir(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/callgraph")
+    }
+
     private fun typeHierarchyCacheFile(): File? {
         val basePath = project.basePath ?: return null
         return File(basePath, ".idea/secrux/typehierarchy.json")
+    }
+
+    private fun typeHierarchyShardsDir(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/typehierarchy")
     }
 
     private fun methodSummaryCacheFile(): File? {
@@ -947,6 +1339,411 @@ class CallGraphService(
     private fun frameworkModelCacheFile(): File? {
         val basePath = project.basePath ?: return null
         return File(basePath, ".idea/secrux/framework-model.json")
+    }
+
+    private fun frameworkModelShardsDir(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/framework-model")
+    }
+
+    private fun pointsToCacheFile(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/pointsto.json")
+    }
+
+    private fun pointsToShardsDir(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/pointsto")
+    }
+
+    private data class CallGraphShard(
+        val key: String,
+        val file: String,
+        val methods: List<Pair<MethodRef, MethodLocation>>,
+        val outgoing: List<Pair<MethodRef, Set<MethodRef>>>,
+        val edgeKinds: List<Pair<CallEdge, CallEdgeKind>>,
+        val callSites: List<Pair<CallEdge, CallSiteLocation>>,
+    )
+
+    private fun shardCallGraph(graph: CallGraph, maxShards: Int = 200): List<CallGraphShard> {
+        val methodsByShard = linkedMapOf<String, MutableList<Pair<MethodRef, MethodLocation>>>()
+        for ((ref, loc) in graph.methods) {
+            val key = shardKeyForMethod(ref)
+            methodsByShard.getOrPut(key) { mutableListOf() }.add(ref to loc)
+        }
+
+        val outgoingByShard = linkedMapOf<String, MutableList<Pair<MethodRef, Set<MethodRef>>>>()
+        for ((caller, callees) in graph.outgoing) {
+            val key = shardKeyForMethod(caller)
+            outgoingByShard.getOrPut(key) { mutableListOf() }.add(caller to callees)
+        }
+
+        val edgeKindsByShard = linkedMapOf<String, MutableList<Pair<CallEdge, CallEdgeKind>>>()
+        for ((edge, kind) in graph.edgeKinds) {
+            val key = shardKeyForMethod(edge.caller)
+            edgeKindsByShard.getOrPut(key) { mutableListOf() }.add(edge to kind)
+        }
+
+        val callSitesByShard = linkedMapOf<String, MutableList<Pair<CallEdge, CallSiteLocation>>>()
+        for ((edge, locs) in graph.callSites) {
+            val key = shardKeyForMethod(edge.caller)
+            for (loc in locs) {
+                callSitesByShard.getOrPut(key) { mutableListOf() }.add(edge to loc)
+            }
+        }
+
+        val keys =
+            (methodsByShard.keys + outgoingByShard.keys + edgeKindsByShard.keys + callSitesByShard.keys)
+                .toSet()
+                .sorted()
+
+        data class RawShard(
+            val key: String,
+            val methods: List<Pair<MethodRef, MethodLocation>>,
+            val outgoing: List<Pair<MethodRef, Set<MethodRef>>>,
+            val edgeKinds: List<Pair<CallEdge, CallEdgeKind>>,
+            val callSites: List<Pair<CallEdge, CallSiteLocation>>,
+        ) {
+            val weight: Int =
+                methods.size +
+                    outgoing.size +
+                    edgeKinds.size +
+                    callSites.size
+        }
+
+        val ordered =
+            keys.map { key ->
+                RawShard(
+                    key = key,
+                    methods = methodsByShard[key].orEmpty().sortedBy { it.first.id },
+                    outgoing = outgoingByShard[key].orEmpty().sortedBy { it.first.id },
+                    edgeKinds =
+                        edgeKindsByShard[key].orEmpty()
+                            .sortedWith(compareBy({ it.first.caller.id }, { it.first.callee.id })),
+                    callSites =
+                        callSitesByShard[key].orEmpty()
+                            .sortedWith(compareBy({ it.first.caller.id }, { it.first.callee.id })),
+                )
+            }.sortedWith(compareByDescending<RawShard> { it.weight }.thenBy { it.key })
+
+        val safeMaxShards = maxShards.coerceIn(1, 500)
+        val capped =
+            if (ordered.size <= safeMaxShards) {
+                ordered
+            } else {
+                val top = ordered.take(safeMaxShards - 1)
+                val rest = ordered.drop(safeMaxShards - 1)
+                val merged =
+                    RawShard(
+                        key = "_OTHER",
+                        methods = rest.flatMap { it.methods }.sortedBy { it.first.id },
+                        outgoing = rest.flatMap { it.outgoing }.sortedBy { it.first.id },
+                        edgeKinds =
+                            rest.flatMap { it.edgeKinds }
+                                .sortedWith(compareBy({ it.first.caller.id }, { it.first.callee.id })),
+                        callSites =
+                            rest.flatMap { it.callSites }
+                                .sortedWith(compareBy({ it.first.caller.id }, { it.first.callee.id })),
+                    )
+                top + merged
+            }
+
+        val dirPrefix = "callgraph"
+        return capped.map { shard ->
+            val fileName = "callgraph_${sanitizeShardKey(shard.key)}.json"
+            CallGraphShard(
+                key = shard.key,
+                file = "$dirPrefix/$fileName",
+                methods = shard.methods,
+                outgoing = shard.outgoing,
+                edgeKinds = shard.edgeKinds,
+                callSites = shard.callSites,
+            )
+        }
+    }
+
+    private fun readCallGraphMethodEntries(
+        methodsArray: List<kotlinx.serialization.json.JsonElement>,
+        basePath: String,
+        out: MutableMap<MethodRef, MethodLocation>,
+    ) {
+        for (entry in methodsArray) {
+            val obj = entry.jsonObject
+            val id = obj["id"]?.jsonPrimitive?.content ?: continue
+            val filePath = obj["filePath"]?.jsonPrimitive?.content ?: continue
+            val startOffset = obj["startOffset"]?.jsonPrimitive?.int ?: 0
+            val ref = MethodRef.fromIdOrNull(id) ?: continue
+            val vf = LocalFileSystem.getInstance().findFileByPath("$basePath/$filePath") ?: continue
+            out[ref] = MethodLocation(file = vf, startOffset = startOffset)
+        }
+    }
+
+    private fun readCallGraphOutgoingEntries(
+        outgoingArray: List<kotlinx.serialization.json.JsonElement>,
+        outgoing: MutableMap<MethodRef, MutableSet<MethodRef>>,
+        incoming: MutableMap<MethodRef, MutableSet<MethodRef>>,
+    ) {
+        for (entry in outgoingArray) {
+            val obj = entry.jsonObject
+            val callerId = obj["caller"]?.jsonPrimitive?.content ?: continue
+            val caller = MethodRef.fromIdOrNull(callerId) ?: continue
+            val callees = obj["callees"]?.jsonArray.orEmpty()
+            for (calleeElem in callees) {
+                val calleeId = calleeElem.jsonPrimitive.content
+                val callee = MethodRef.fromIdOrNull(calleeId) ?: continue
+                outgoing.getOrPut(caller) { linkedSetOf() }.add(callee)
+                incoming.getOrPut(callee) { linkedSetOf() }.add(caller)
+            }
+        }
+    }
+
+    private fun readCallGraphEdgeKindEntries(
+        edgeKindsArray: List<kotlinx.serialization.json.JsonElement>,
+        out: MutableMap<CallEdge, CallEdgeKind>,
+    ) {
+        for (entry in edgeKindsArray) {
+            val obj = entry.jsonObject
+            val callerId = obj["caller"]?.jsonPrimitive?.content ?: continue
+            val calleeId = obj["callee"]?.jsonPrimitive?.content ?: continue
+            val kindStr = obj["kind"]?.jsonPrimitive?.content ?: continue
+            val caller = MethodRef.fromIdOrNull(callerId) ?: continue
+            val callee = MethodRef.fromIdOrNull(calleeId) ?: continue
+            val kind = runCatching { CallEdgeKind.valueOf(kindStr) }.getOrNull() ?: continue
+            out.putIfAbsent(CallEdge(caller = caller, callee = callee), kind)
+        }
+    }
+
+    private fun readCallGraphCallSiteEntries(
+        callSitesArray: List<kotlinx.serialization.json.JsonElement>,
+        basePath: String,
+        out: MutableMap<CallEdge, MutableList<CallSiteLocation>>,
+    ) {
+        for (entry in callSitesArray) {
+            val obj = entry.jsonObject
+            val callerId = obj["caller"]?.jsonPrimitive?.content ?: continue
+            val calleeId = obj["callee"]?.jsonPrimitive?.content ?: continue
+            val filePath = obj["filePath"]?.jsonPrimitive?.content ?: continue
+            val startOffset = obj["startOffset"]?.jsonPrimitive?.int ?: 0
+            val caller = MethodRef.fromIdOrNull(callerId) ?: continue
+            val callee = MethodRef.fromIdOrNull(calleeId) ?: continue
+            val vf = LocalFileSystem.getInstance().findFileByPath("$basePath/$filePath") ?: continue
+            val edge = CallEdge(caller = caller, callee = callee)
+            val list = out.getOrPut(edge) { mutableListOf() }
+            if (list.none { it.startOffset == startOffset }) {
+                list.add(CallSiteLocation(file = vf, startOffset = startOffset))
+            }
+        }
+    }
+
+    private data class TypeHierarchyShard(
+        val key: String,
+        val file: String,
+        val edges: List<TypeHierarchyEdge>,
+    )
+
+    private fun shardTypeHierarchy(index: TypeHierarchyIndex, maxShards: Int = 200): List<TypeHierarchyShard> {
+        if (index.edges.isEmpty()) return emptyList()
+        val shards = linkedMapOf<String, MutableList<TypeHierarchyEdge>>()
+        for (edge in index.edges) {
+            val key = shardKeyForTypeFqn(edge.from)
+            shards.getOrPut(key) { mutableListOf() }.add(edge)
+        }
+
+        val ordered: List<Pair<String, List<TypeHierarchyEdge>>> =
+            shards.entries
+                .sortedWith(compareByDescending<Map.Entry<String, MutableList<TypeHierarchyEdge>>> { it.value.size }.thenBy { it.key })
+                .map { it.key to it.value.toList() }
+                .toList()
+
+        val safeMaxShards = maxShards.coerceIn(1, 500)
+        val capped =
+            if (ordered.size <= safeMaxShards) {
+                ordered
+            } else {
+                val top = ordered.take(safeMaxShards - 1)
+                val rest = ordered.drop(safeMaxShards - 1)
+                val merged = rest.flatMap { it.second }
+                top + listOf("_OTHER" to merged)
+            }
+
+        val dirPrefix = "typehierarchy"
+        return capped.map { (key, edges) ->
+            val fileName = "typehierarchy_${sanitizeShardKey(key)}.json"
+            TypeHierarchyShard(
+                key = key,
+                file = "$dirPrefix/$fileName",
+                edges =
+                    edges.sortedWith(
+                        compareBy<TypeHierarchyEdge>({ it.from }, { it.to }, { it.kind.name })
+                    ),
+            )
+        }
+    }
+
+    private fun readTypeHierarchyEdgeEntries(
+        edgesArray: List<kotlinx.serialization.json.JsonElement>,
+        out: MutableSet<TypeHierarchyEdge>,
+    ) {
+        for (elem in edgesArray) {
+            val obj = elem.jsonObject
+            val from = obj["from"]?.jsonPrimitive?.content ?: continue
+            val to = obj["to"]?.jsonPrimitive?.content ?: continue
+            val kindStr = obj["kind"]?.jsonPrimitive?.content ?: continue
+            val kind = runCatching { TypeEdgeKind.valueOf(kindStr) }.getOrNull() ?: continue
+            out.add(TypeHierarchyEdge(from = from, to = to, kind = kind))
+        }
+    }
+
+    private data class FrameworkModelShard(
+        val key: String,
+        val file: String,
+        val beans: List<BeanDefinition>,
+        val injections: List<InjectionPoint>,
+    )
+
+    private fun shardFrameworkModel(index: FrameworkModelIndex, maxShards: Int = 200): List<FrameworkModelShard> {
+        if (index.beans.isEmpty() && index.injections.isEmpty()) return emptyList()
+
+        val beansByShard = linkedMapOf<String, MutableList<BeanDefinition>>()
+        for (bean in index.beans) {
+            val key = shardKeyForTypeFqn(bean.typeFqn)
+            beansByShard.getOrPut(key) { mutableListOf() }.add(bean)
+        }
+
+        val injectionsByShard = linkedMapOf<String, MutableList<InjectionPoint>>()
+        for (inj in index.injections) {
+            val key = shardKeyForTypeFqn(inj.ownerClassFqn)
+            injectionsByShard.getOrPut(key) { mutableListOf() }.add(inj)
+        }
+
+        val keys =
+            (beansByShard.keys + injectionsByShard.keys)
+                .toSet()
+                .sorted()
+
+        data class RawShard(
+            val key: String,
+            val beans: List<BeanDefinition>,
+            val injections: List<InjectionPoint>,
+        ) {
+            val weight: Int = beans.size + injections.size
+        }
+
+        val ordered =
+            keys.map { key ->
+                RawShard(
+                    key = key,
+                    beans =
+                        beansByShard[key].orEmpty()
+                            .sortedWith(compareBy({ it.typeFqn }, { it.kind.name }, { it.source.orEmpty() })),
+                    injections =
+                        injectionsByShard[key].orEmpty()
+                            .sortedWith(
+                                compareBy(
+                                    { it.ownerClassFqn },
+                                    { it.kind.name },
+                                    { it.targetTypeFqn },
+                                    { it.methodId.orEmpty() },
+                                    { it.paramIndex ?: -1 },
+                                    { it.name.orEmpty() },
+                                )
+                            ),
+                )
+            }.sortedWith(compareByDescending<RawShard> { it.weight }.thenBy { it.key })
+
+        val safeMaxShards = maxShards.coerceIn(1, 500)
+        val capped =
+            if (ordered.size <= safeMaxShards) {
+                ordered
+            } else {
+                val top = ordered.take(safeMaxShards - 1)
+                val rest = ordered.drop(safeMaxShards - 1)
+                val merged =
+                    RawShard(
+                        key = "_OTHER",
+                        beans =
+                            rest.flatMap { it.beans }
+                                .sortedWith(compareBy({ it.typeFqn }, { it.kind.name }, { it.source.orEmpty() })),
+                        injections =
+                            rest.flatMap { it.injections }
+                                .sortedWith(
+                                    compareBy(
+                                        { it.ownerClassFqn },
+                                        { it.kind.name },
+                                        { it.targetTypeFqn },
+                                        { it.methodId.orEmpty() },
+                                        { it.paramIndex ?: -1 },
+                                        { it.name.orEmpty() },
+                                    )
+                                ),
+                    )
+                top + merged
+            }
+
+        val dirPrefix = "framework-model"
+        return capped.map { shard ->
+            val fileName = "framework-model_${sanitizeShardKey(shard.key)}.json"
+            FrameworkModelShard(
+                key = shard.key,
+                file = "$dirPrefix/$fileName",
+                beans = shard.beans,
+                injections = shard.injections,
+            )
+        }
+    }
+
+    private fun readFrameworkBeanEntries(
+        beansArray: List<kotlinx.serialization.json.JsonElement>,
+        out: MutableSet<BeanDefinition>,
+    ) {
+        for (elem in beansArray) {
+            val obj = elem.jsonObject
+            val typeFqn = obj["typeFqn"]?.jsonPrimitive?.content ?: continue
+            val kindStr = obj["kind"]?.jsonPrimitive?.content ?: continue
+            val kind = runCatching { BeanKind.valueOf(kindStr) }.getOrNull() ?: continue
+            val source = obj["source"]?.jsonPrimitive?.contentOrNull
+            val filePath = obj["filePath"]?.jsonPrimitive?.contentOrNull
+            val startOffset = obj["startOffset"]?.jsonPrimitive?.int
+            out.add(
+                BeanDefinition(
+                    typeFqn = typeFqn,
+                    kind = kind,
+                    source = source,
+                    filePath = filePath,
+                    startOffset = startOffset,
+                )
+            )
+        }
+    }
+
+    private fun readFrameworkInjectionEntries(
+        injectionsArray: List<kotlinx.serialization.json.JsonElement>,
+        out: MutableList<InjectionPoint>,
+    ) {
+        for (elem in injectionsArray) {
+            val obj = elem.jsonObject
+            val ownerClassFqn = obj["ownerClassFqn"]?.jsonPrimitive?.content ?: continue
+            val kindStr = obj["kind"]?.jsonPrimitive?.content ?: continue
+            val kind = runCatching { InjectionKind.valueOf(kindStr) }.getOrNull() ?: continue
+            val targetTypeFqn = obj["targetTypeFqn"]?.jsonPrimitive?.content ?: continue
+            val name = obj["name"]?.jsonPrimitive?.contentOrNull
+            val methodId = obj["methodId"]?.jsonPrimitive?.contentOrNull
+            val paramIndex = obj["paramIndex"]?.jsonPrimitive?.int
+            val filePath = obj["filePath"]?.jsonPrimitive?.contentOrNull
+            val startOffset = obj["startOffset"]?.jsonPrimitive?.int
+            out.add(
+                InjectionPoint(
+                    ownerClassFqn = ownerClassFqn,
+                    kind = kind,
+                    targetTypeFqn = targetTypeFqn,
+                    name = name,
+                    methodId = methodId,
+                    paramIndex = paramIndex,
+                    filePath = filePath,
+                    startOffset = startOffset,
+                )
+            )
+        }
     }
 
     private data class MethodSummaryShard(
@@ -995,6 +1792,14 @@ class CallGraphService(
 
     private fun shardKeyForMethod(ref: MethodRef, packageSegments: Int = 2): String {
         val parts = ref.classFqn.split('.')
+        if (parts.size <= 1) return "_DEFAULT"
+        val pkg = parts.dropLast(1)
+        val head = pkg.take(packageSegments.coerceIn(1, 6))
+        return head.joinToString(".").ifBlank { "_DEFAULT" }
+    }
+
+    private fun shardKeyForTypeFqn(typeFqn: String, packageSegments: Int = 2): String {
+        val parts = typeFqn.split('.')
         if (parts.size <= 1) return "_DEFAULT"
         val pkg = parts.dropLast(1)
         val head = pkg.take(packageSegments.coerceIn(1, 6))
@@ -1158,7 +1963,7 @@ class CallGraphService(
         val methods = linkedMapOf<MethodRef, MethodLocation>()
         val outgoing = linkedMapOf<MethodRef, MutableSet<MethodRef>>()
         val incoming = linkedMapOf<MethodRef, MutableSet<MethodRef>>()
-        val callSites = linkedMapOf<CallEdge, CallSiteLocation>()
+        val callSites = linkedMapOf<CallEdge, MutableList<CallSiteLocation>>()
         val edgeKinds = linkedMapOf<CallEdge, CallEdgeKind>()
         val entryPoints = linkedSetOf<MethodRef>()
         val typesIndexed = linkedSetOf<String>()
@@ -1383,10 +2188,10 @@ class CallGraphService(
                                 incoming.getOrPut(calleeRef) { linkedSetOf() }.add(callerRef)
 
                                 if (callOffset != null && callOffset >= 0) {
-                                    callSites.putIfAbsent(
-                                        edge,
-                                        CallSiteLocation(file = file, startOffset = callOffset),
-                                    )
+                                    val list = callSites.getOrPut(edge) { mutableListOf() }
+                                    if (list.none { it.startOffset == callOffset }) {
+                                        list.add(CallSiteLocation(file = file, startOffset = callOffset))
+                                    }
                                 }
                             }
 
@@ -1719,32 +2524,48 @@ class CallGraphService(
                             val methodRef = enclosing.javaPsi.toMethodRefOrNull() ?: return false
 
                             val returned = node.returnExpression ?: return false
-                            val field = resolveField(returned) ?: return false
-
-                            val receiverToken =
-                                if (field.hasModifierProperty(PsiModifier.STATIC)) {
-                                    null
-                                } else {
-                                    when (returned) {
-                                        is UQualifiedReferenceExpression -> receiverTokenForQualified(enclosing, methodRef, returned)
-                                        is USimpleNameReferenceExpression -> null
-                                        else -> OTHER_RECEIVER_TOKEN
-                                    }
-                                }
-
-                            val owner = field.containingClass?.qualifiedName ?: return false
                             val offset = node.sourcePsi?.textRange?.startOffset ?: returned.sourcePsi?.textRange?.startOffset
 
-                            rawFieldLoadsByMethod.getOrPut(methodRef) { mutableListOf() }.add(
-                                RawFieldLoad(
-                                    ownerFqn = owner,
-                                    fieldName = field.name,
-                                    isStatic = field.hasModifierProperty(PsiModifier.STATIC),
-                                    receiverToken = receiverToken,
-                                    targetToken = RETURN_VALUE_TOKEN,
-                                    offset = offset,
+                            val field = resolveField(returned)
+                            if (field != null) {
+                                val receiverToken =
+                                    if (field.hasModifierProperty(PsiModifier.STATIC)) {
+                                        null
+                                    } else {
+                                        when (returned) {
+                                            is UQualifiedReferenceExpression -> receiverTokenForQualified(enclosing, methodRef, returned)
+                                            is USimpleNameReferenceExpression -> null
+                                            else -> OTHER_RECEIVER_TOKEN
+                                        }
+                                    }
+
+                                val owner = field.containingClass?.qualifiedName ?: return false
+                                rawFieldLoadsByMethod.getOrPut(methodRef) { mutableListOf() }.add(
+                                    RawFieldLoad(
+                                        ownerFqn = owner,
+                                        fieldName = field.name,
+                                        isStatic = field.hasModifierProperty(PsiModifier.STATIC),
+                                        receiverToken = receiverToken,
+                                        targetToken = RETURN_VALUE_TOKEN,
+                                        offset = offset,
+                                    )
                                 )
-                            )
+                                return false
+                            }
+
+                            val returnedToken =
+                                valueTokenForExpression(enclosing, methodRef, returned)
+                                    ?: "${UNKNOWN_TOKEN_PREFIX}RETURN_EXPR"
+
+                            if (RETURN_VALUE_TOKEN != returnedToken) {
+                                rawAliasEdgesByMethod.getOrPut(methodRef) { mutableListOf() }.add(
+                                    RawAliasEdge(
+                                        leftToken = RETURN_VALUE_TOKEN,
+                                        rightToken = returnedToken,
+                                        offset = offset,
+                                    )
+                                )
+                            }
 
                             return false
                         }
@@ -2005,7 +2826,10 @@ class CallGraphService(
                     methods = methods.toMap(),
                     outgoing = outgoing.mapValues { (_, v) -> v.toSet() },
                     incoming = incoming.mapValues { (_, v) -> v.toSet() },
-                    callSites = callSites.toMap(),
+                    callSites =
+                        callSites.mapValues { (_, locs) ->
+                            locs.distinctBy { it.startOffset }.sortedBy { it.startOffset }
+                        },
                     edgeKinds = edgeKinds.toMap(),
                     entryPoints = entryPoints.toSet(),
                     stats = stats,
@@ -2416,6 +3240,7 @@ class CallGraphService(
         private const val OTHER_RECEIVER_TOKEN = "__secrux_receiver_other__"
         private const val RETURN_VALUE_TOKEN = "__secrux_return__"
         private const val CALL_RESULT_TOKEN_PREFIX = "CALLRET@"
+        private const val UNKNOWN_TOKEN_PREFIX = "UNKNOWN:"
 
         fun getInstance(project: Project): CallGraphService = project.service()
     }

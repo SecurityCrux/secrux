@@ -48,7 +48,7 @@ data class CallGraph(
     val methods: Map<MethodRef, MethodLocation>,
     val outgoing: Map<MethodRef, Set<MethodRef>>,
     val incoming: Map<MethodRef, Set<MethodRef>>,
-    val callSites: Map<CallEdge, CallSiteLocation> = emptyMap(),
+    val callSites: Map<CallEdge, List<CallSiteLocation>> = emptyMap(),
     val edgeKinds: Map<CallEdge, CallEdgeKind> = emptyMap(),
     val entryPoints: Set<MethodRef> = emptySet(),
     val stats: CallGraphStats
@@ -60,3 +60,15 @@ data class CallGraphStats(
     val callEdges: Int,
     val unresolvedCalls: Int
 )
+
+fun CallGraph.callSiteFor(edge: CallEdge, preferredOffset: Int? = null): CallSiteLocation? {
+    val sites = callSites[edge].orEmpty()
+    if (sites.isEmpty()) return null
+    if (preferredOffset != null) {
+        sites.firstOrNull { it.startOffset == preferredOffset }?.let { return it }
+    }
+    return sites.firstOrNull()
+}
+
+fun CallGraph.callSiteOffsets(edge: CallEdge): Set<Int> =
+    callSites[edge]?.mapTo(linkedSetOf()) { it.startOffset } ?: emptySet()

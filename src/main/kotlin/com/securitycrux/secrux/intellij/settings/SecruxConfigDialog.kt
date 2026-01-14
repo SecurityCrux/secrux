@@ -30,6 +30,13 @@ class SecruxConfigDialog(
         override fun toString(): String = title
     }
 
+    private data class PointsToComboItem(
+        val id: String,
+        val title: String
+    ) {
+        override fun toString(): String = title
+    }
+
     private val settings = SecruxProjectSettings.getInstance(project)
 
     private val baseUrlField = JBTextField(settings.state.baseUrl)
@@ -57,6 +64,37 @@ class SecruxConfigDialog(
     private val sinkCatalogFileField = JBTextField(settings.state.sinkCatalogFilePath).apply {
         toolTipText = SecruxBundle.message("tooltip.sinkCatalogFile")
         minimumSize = Dimension(JBUI.scale(260), preferredSize.height)
+    }
+
+    private val pointsToModeItems =
+        arrayOf(
+            PointsToComboItem("OFF", SecruxBundle.message("pointsTo.mode.off")),
+            PointsToComboItem("PRECOMPUTE", SecruxBundle.message("pointsTo.mode.precompute")),
+        )
+    private val pointsToModeCombo = JComboBox(pointsToModeItems).apply {
+        toolTipText = SecruxBundle.message("tooltip.pointsTo.mode")
+        selectedItem = pointsToModeItems.firstOrNull { it.id == settings.state.pointsToIndexMode } ?: pointsToModeItems.first()
+    }
+
+    private val pointsToAbstractionItems =
+        arrayOf(
+            PointsToComboItem("TYPE", SecruxBundle.message("pointsTo.abstraction.type")),
+            PointsToComboItem("ALLOC_SITE", SecruxBundle.message("pointsTo.abstraction.allocSite")),
+        )
+    private val pointsToAbstractionCombo = JComboBox(pointsToAbstractionItems).apply {
+        toolTipText = SecruxBundle.message("tooltip.pointsTo.abstraction")
+        selectedItem =
+            pointsToAbstractionItems.firstOrNull { it.id == settings.state.pointsToAbstraction } ?: pointsToAbstractionItems.first()
+    }
+
+    private val pointsToMaxRootsField = JBTextField(settings.state.pointsToMaxRootsPerToken.toString()).apply {
+        toolTipText = SecruxBundle.message("tooltip.pointsTo.maxRoots")
+    }
+    private val pointsToMaxBeanCandidatesField = JBTextField(settings.state.pointsToMaxBeanCandidates.toString()).apply {
+        toolTipText = SecruxBundle.message("tooltip.pointsTo.maxBeanCandidates")
+    }
+    private val pointsToMaxCallTargetsField = JBTextField(settings.state.pointsToMaxCallTargets.toString()).apply {
+        toolTipText = SecruxBundle.message("tooltip.pointsTo.maxCallTargets")
     }
 
     private val tokenField = JBPasswordField()
@@ -150,6 +188,18 @@ class SecruxConfigDialog(
         form.add(JBLabel(SecruxBundle.message("label.sinkCatalogFile")))
         form.add(sinkCatalogFileField)
 
+        form.add(JBLabel(SecruxBundle.message("config.section.analysis")))
+        form.add(JBLabel(SecruxBundle.message("label.pointsTo.mode")))
+        form.add(pointsToModeCombo)
+        form.add(JBLabel(SecruxBundle.message("label.pointsTo.abstraction")))
+        form.add(pointsToAbstractionCombo)
+        form.add(JBLabel(SecruxBundle.message("label.pointsTo.maxRoots")))
+        form.add(pointsToMaxRootsField)
+        form.add(JBLabel(SecruxBundle.message("label.pointsTo.maxBeanCandidates")))
+        form.add(pointsToMaxBeanCandidatesField)
+        form.add(JBLabel(SecruxBundle.message("label.pointsTo.maxCallTargets")))
+        form.add(pointsToMaxCallTargetsField)
+
         form.add(JBLabel(SecruxBundle.message("config.section.auth")))
         form.add(JBLabel(SecruxBundle.message("label.accessToken")))
         form.add(tokenField)
@@ -185,6 +235,16 @@ class SecruxConfigDialog(
         settings.state.sinkCatalogId =
             (sinkCatalogCombo.selectedItem as? SinkCatalogComboItem)?.id ?: SinkCatalog.ID_BUILTIN_ALL
         settings.state.sinkCatalogFilePath = sinkCatalogFileField.text.trim()
+
+        settings.state.pointsToIndexMode =
+            (pointsToModeCombo.selectedItem as? PointsToComboItem)?.id ?: "OFF"
+        settings.state.pointsToAbstraction =
+            (pointsToAbstractionCombo.selectedItem as? PointsToComboItem)?.id ?: "TYPE"
+        settings.state.pointsToMaxRootsPerToken = pointsToMaxRootsField.text.trim().toIntOrNull()?.coerceIn(1, 5_000) ?: 60
+        settings.state.pointsToMaxBeanCandidates =
+            pointsToMaxBeanCandidatesField.text.trim().toIntOrNull()?.coerceIn(0, 500) ?: 25
+        settings.state.pointsToMaxCallTargets =
+            pointsToMaxCallTargetsField.text.trim().toIntOrNull()?.coerceIn(1, 500) ?: 50
 
         super.doOKAction()
     }

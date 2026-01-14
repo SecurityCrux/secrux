@@ -250,7 +250,7 @@ class CallChainsDialog(
                                                     when (step) {
                                                         is MethodStep ->
                                                             when (next) {
-                                                                is MethodStep -> graph.callSites[CallEdge(caller = step.ref, callee = next.ref)]
+                                                                is MethodStep -> graph.callSiteFor(CallEdge(caller = step.ref, callee = next.ref))
                                                                 is SinkStep -> CallSiteLocation(file = next.file, startOffset = next.startOffset)
                                                                 else -> null
                                                             }
@@ -456,7 +456,7 @@ class CallChainsDialog(
                             idx < 0 || idx >= chainSteps.lastIndex -> null
                             else -> {
                                 when (next) {
-                                    is MethodStep -> graph.callSites[CallEdge(caller = obj.ref, callee = next.ref)]
+                                    is MethodStep -> graph.callSiteFor(CallEdge(caller = obj.ref, callee = next.ref))
                                     is SinkStep -> CallSiteLocation(file = next.file, startOffset = next.startOffset)
                                     else -> null
                                 }

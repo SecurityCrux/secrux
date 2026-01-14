@@ -21,7 +21,12 @@ data class SecruxProjectSettingsState(
     var excludedPathRegex: String = "",
     var excludedSinkTypes: MutableList<String> = mutableListOf(),
     var sinkCatalogId: String = "builtin_all",
-    var sinkCatalogFilePath: String = ""
+    var sinkCatalogFilePath: String = "",
+    var pointsToIndexMode: String = "OFF",
+    var pointsToAbstraction: String = "TYPE",
+    var pointsToMaxRootsPerToken: Int = 60,
+    var pointsToMaxBeanCandidates: Int = 25,
+    var pointsToMaxCallTargets: Int = 50,
 )
 
 @Service(Service.Level.PROJECT)

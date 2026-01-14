@@ -43,6 +43,7 @@ class ValueFlowTracer(
     private val summaries: MethodSummaryIndex,
     private val typeHierarchy: TypeHierarchyIndex? = null,
     private val frameworkModel: FrameworkModelIndex? = null,
+    private val pointsToIndex: PointsToIndex? = null,
 ) {
     private data class TraceState(
         val node: ValueFlowNode,
@@ -99,11 +100,6 @@ class ValueFlowTracer(
     private val knownTypeChildren: Set<String> = typeParentsByChild.keys
 
     private val allParentsCache = hashMapOf<String, Set<String>>()
-
-    private data class PointsToResult(
-        val roots: Set<String>,
-        val truncated: Boolean,
-    )
 
     private data class PointsToKey(
         val method: MethodRef,
@@ -588,8 +584,8 @@ class ValueFlowTracer(
             for (callee in graph.outgoing[caller].orEmpty()) {
                 if (out.size >= maxTargets) break
                 val edge = CallEdge(caller = caller, callee = callee)
-                val loc = graph.callSites[edge] ?: continue
-                if (loc.startOffset == callOffset) {
+                val locs = graph.callSites[edge].orEmpty()
+                if (locs.any { it.startOffset == callOffset }) {
                     out.add(callee)
                 }
             }
@@ -749,6 +745,11 @@ class ValueFlowTracer(
         val key = PointsToKey(method = node.method, token = token)
         pointsToCache[key]?.let { return it }
 
+        pointsToIndex?.query(method = node.method, token = token)?.let { indexed ->
+            pointsToCache[key] = indexed
+            return indexed
+        }
+
         val safeMaxDepth = maxDepth.coerceIn(0, 30)
         val safeMaxStates = maxStates.coerceIn(1, 50_000)
         val safeMaxRoots = maxRoots.coerceIn(1, 5_000)
@@ -901,13 +902,17 @@ class ValueFlowTracer(
         for (caller in incomingCallers) {
             val callerSummary = summaries.summaries[caller] ?: continue
             val directCallSites = callerSummary.calls.filter { it.calleeId == node.method.id }
-            val edgeCallOffset = graph.callSites[CallEdge(caller = caller, callee = node.method)]?.startOffset
+            val edgeCallOffsets =
+                graph.callSites[CallEdge(caller = caller, callee = node.method)]
+                    ?.mapTo(hashSetOf()) { it.startOffset }
+                    .orEmpty()
             val callSites =
                 buildList {
                     addAll(directCallSites)
-                    if (edgeCallOffset != null) {
+                    if (edgeCallOffsets.isNotEmpty()) {
                         for (call in callerSummary.calls) {
-                            if (call.callOffset == edgeCallOffset) add(call)
+                            val offset = call.callOffset ?: continue
+                            if (offset in edgeCallOffsets) add(call)
                         }
                     }
                 }.distinctBy { "${it.callOffset}:${it.calleeId}" }

@@ -18,6 +18,7 @@ import com.securitycrux.secrux.intellij.callgraph.CallGraphService
 import com.securitycrux.secrux.intellij.callgraph.CallSiteLocation
 import com.securitycrux.secrux.intellij.callgraph.MethodLocation
 import com.securitycrux.secrux.intellij.callgraph.MethodRef
+import com.securitycrux.secrux.intellij.callgraph.callSiteFor
 import com.securitycrux.secrux.intellij.enrichment.SecruxPsiUastEnrichmentService
 import com.securitycrux.secrux.intellij.i18n.SecruxBundle
 import com.securitycrux.secrux.intellij.sinks.SinkMatch
@@ -81,6 +82,7 @@ class SecruxFindingReporter(
                     summaries = methodSummariesSnapshot,
                     typeHierarchy = typeHierarchySnapshot,
                     frameworkModel = frameworkModelSnapshot,
+                    pointsToIndex = callGraphService.getLastPointsToIndex(),
                 )
             } else {
                 null
@@ -926,10 +928,10 @@ class SecruxFindingReporter(
                     var prevNodeId: String? = null
                     var prevMethodRef: MethodRef? = null
                     for ((idx, ref) in trimmedChain.withIndex()) {
-                        val loc =
+                                val loc =
                             if (idx < trimmedChain.lastIndex) {
                                 val next = trimmedChain[idx + 1]
-                                val edgeLoc = locationForCallSite(graph.callSites[CallEdge(caller = ref, callee = next)], fileDocumentManager)
+                                val edgeLoc = locationForCallSite(graph.callSiteFor(CallEdge(caller = ref, callee = next)), fileDocumentManager)
                                 if (edgeLoc.path == null) locationForMethod(graph.methods[ref], fileDocumentManager) else edgeLoc
                             } else {
                                 locationForMethod(graph.methods[ref], fileDocumentManager)
@@ -1041,7 +1043,7 @@ class SecruxFindingReporter(
                                                 if (next != null) {
                                                     val edgeLoc =
                                                         locationForCallSite(
-                                                            graph.callSites[CallEdge(caller = ref, callee = next)],
+                                                            graph.callSiteFor(CallEdge(caller = ref, callee = next)),
                                                             fileDocumentManager,
                                                         )
                                                     if (edgeLoc.path == null) locationForMethod(graph.methods[ref], fileDocumentManager) else edgeLoc
