@@ -24,6 +24,8 @@ data class InjectionPoint(
     val kind: InjectionKind,
     val targetTypeFqn: String,
     val name: String?,
+    val methodId: String? = null,
+    val paramIndex: Int? = null,
     val filePath: String?,
     val startOffset: Int?,
 )
@@ -40,4 +42,3 @@ data class FrameworkModelIndex(
     val injections: List<InjectionPoint>,
     val stats: FrameworkModelStats,
 )
-

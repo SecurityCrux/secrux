@@ -27,6 +27,8 @@ import com.securitycrux.secrux.intellij.settings.SecruxTokenStore
 import com.securitycrux.secrux.intellij.secrux.ReportToSecruxDialog
 import com.securitycrux.secrux.intellij.secrux.SecruxFindingReporter
 import com.securitycrux.secrux.intellij.sinks.SinkMatch
+import com.securitycrux.secrux.intellij.valueflow.ValueFlowTrace
+import com.securitycrux.secrux.intellij.valueflow.ValueFlowTracer
 import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -110,6 +112,21 @@ class SecruxResultsToolWindowPanel(
             val entryPointOnly = mustReachEntryPointCheckbox.isSelected
             val entryPoints = graph.entryPoints
 
+            val methodSummaries = callGraphService.getLastMethodSummaries()
+            val typeHierarchy = callGraphService.getLastTypeHierarchy()
+            val frameworkModel = callGraphService.getLastFrameworkModel()
+            val valueFlowTracer =
+                if (methodSummaries != null) {
+                    ValueFlowTracer(
+                        graph = graph,
+                        summaries = methodSummaries,
+                        typeHierarchy = typeHierarchy,
+                        frameworkModel = frameworkModel,
+                    )
+                } else {
+                    null
+                }
+
             val sections = mutableListOf<CallChainsDialog.Section>()
             for (row in selectedRows) {
                 val match = row.primary
@@ -135,25 +152,79 @@ class SecruxResultsToolWindowPanel(
                         name = match.targetMember,
                         paramCount = match.targetParamCount,
                     )
+
+                val sinkCallsite =
+                    if (sinkMethodRef != null) {
+                        val summary = methodSummaries?.summaries?.get(sinkMethodRef)
+                        summary?.calls
+                            ?.filter { it.calleeId == sinkCalleeRef.id }
+                            ?.minByOrNull { cs ->
+                                val off = cs.callOffset ?: Int.MAX_VALUE
+                                abs(off - match.startOffset)
+                            }
+                    } else {
+                        null
+                    }
+
+                val sinkValueFlows =
+                    if (sinkMethodRef != null && sinkCallsite != null && valueFlowTracer != null) {
+                        buildList {
+                            sinkCallsite.receiver
+                                ?.takeIf { it.isNotBlank() && it != "UNKNOWN" }
+                                ?.let { token ->
+                                    val traces =
+                                        valueFlowTracer.traceToRoots(
+                                            startMethod = sinkMethodRef,
+                                            startToken = token,
+                                            maxDepth = 10,
+                                            maxStates = 1500,
+                                            maxTraces = 3,
+                                        )
+                                    if (traces.isEmpty()) {
+                                        add(CallChainsDialog.ValueFlowTraceItem(label = "receiver=$token", trace = null))
+                                    } else {
+                                        for ((idx, trace) in traces.withIndex()) {
+                                            val suffix = if (traces.size > 1) " #${idx + 1}" else ""
+                                            add(CallChainsDialog.ValueFlowTraceItem(label = "receiver=$token$suffix", trace = trace))
+                                        }
+                                    }
+                                }
+
+                            val maxArgsToTrace = minOf(sinkCallsite.args.size, 3)
+                            for (idx in 0 until maxArgsToTrace) {
+                                val token = sinkCallsite.args[idx]
+                                if (token.isBlank() || token == "UNKNOWN") continue
+                                val traces =
+                                    valueFlowTracer.traceToRoots(
+                                        startMethod = sinkMethodRef,
+                                        startToken = token,
+                                        maxDepth = 10,
+                                        maxStates = 1500,
+                                        maxTraces = 3,
+                                    )
+                                if (traces.isEmpty()) {
+                                    add(CallChainsDialog.ValueFlowTraceItem(label = "arg$idx=$token", trace = null))
+                                } else {
+                                    for ((tIdx, trace) in traces.withIndex()) {
+                                        val suffix = if (traces.size > 1) " #${tIdx + 1}" else ""
+                                        add(CallChainsDialog.ValueFlowTraceItem(label = "arg$idx=$token$suffix", trace = trace))
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        emptyList()
+                    }
                 val infoLines =
                     buildList {
                         add(SecruxBundle.message("dialog.callChains.target", target.id))
                         if (sinkMethodRef != null) {
                             add("sinkCall: ${match.targetClassFqn}#${match.targetMember}/${match.targetParamCount}")
-                            val summaries = callGraphService.getLastMethodSummaries()
-                            val summary = summaries?.summaries?.get(sinkMethodRef)
-                            val callsite =
-                                summary?.calls
-                                    ?.filter { it.calleeId == sinkCalleeRef.id }
-                                    ?.minByOrNull { cs ->
-                                        val off = cs.callOffset ?: Int.MAX_VALUE
-                                        abs(off - match.startOffset)
-                                    }
-                            if (callsite != null) {
-                                val recv = callsite.receiver ?: "UNKNOWN"
-                                val args = callsite.args.joinToString(",")
-                                val ret = callsite.result ?: "UNKNOWN"
-                                val loc = callsite.callOffset?.let { " @${it}" }.orEmpty()
+                            if (sinkCallsite != null) {
+                                val recv = sinkCallsite.receiver ?: "UNKNOWN"
+                                val args = sinkCallsite.args.joinToString(",")
+                                val ret = sinkCallsite.result ?: "UNKNOWN"
+                                val loc = sinkCallsite.callOffset?.let { " @${it}" }.orEmpty()
                                 add("sinkCallsite: recv=$recv args=[$args] ret=$ret$loc")
                             }
                         }
@@ -216,6 +287,7 @@ class SecruxResultsToolWindowPanel(
                                     startOffset = match.startOffset,
                                     line = match.line,
                                     column = match.column,
+                                    valueFlows = sinkValueFlows,
                                 ),
                             )
                         }
@@ -467,6 +539,34 @@ class SecruxResultsToolWindowPanel(
     private fun relativePath(absolutePath: String): String {
         val basePath = project.basePath ?: return absolutePath
         return absolutePath.removePrefix(basePath).removePrefix("/")
+    }
+
+    private fun formatValueFlowTrace(trace: ValueFlowTrace, maxEdges: Int): List<String> {
+        fun shortMethod(ref: MethodRef): String {
+            val clazz = ref.classFqn.substringAfterLast('.')
+            return "$clazz#${ref.name}/${ref.paramCount}"
+        }
+
+        val edges = trace.edges
+        if (edges.isEmpty()) {
+            return listOf("root: ${shortMethod(trace.end.method)} ${trace.end.token}")
+        }
+
+        val out = mutableListOf<String>()
+        val limit = maxEdges.coerceIn(1, 50)
+        for ((idx, edge) in edges.take(limit).withIndex()) {
+            val loc = edge.offset?.let { " @${it}" }.orEmpty()
+            out.add(
+                "${idx + 1}) [${edge.kind}] " +
+                    "${shortMethod(edge.from.method)} ${edge.from.token} -> " +
+                    "${shortMethod(edge.to.method)} ${edge.to.token}$loc"
+            )
+        }
+        if (edges.size > limit) {
+            out.add("... +${edges.size - limit}")
+        }
+        out.add("root: ${shortMethod(trace.end.method)} ${trace.end.token}")
+        return out
     }
 
     private fun applyFilters() {

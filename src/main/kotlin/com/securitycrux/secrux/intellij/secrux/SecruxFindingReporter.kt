@@ -6,6 +6,8 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiManager
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.util.PsiTreeUtil
@@ -20,6 +22,10 @@ import com.securitycrux.secrux.intellij.enrichment.SecruxPsiUastEnrichmentServic
 import com.securitycrux.secrux.intellij.i18n.SecruxBundle
 import com.securitycrux.secrux.intellij.sinks.SinkMatch
 import com.securitycrux.secrux.intellij.util.SecruxNotifications
+import com.securitycrux.secrux.intellij.valueflow.MethodSummaryIndex
+import com.securitycrux.secrux.intellij.valueflow.ValueFlowEdge
+import com.securitycrux.secrux.intellij.valueflow.ValueFlowEdgeKind
+import com.securitycrux.secrux.intellij.valueflow.ValueFlowTracer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonArray
@@ -35,6 +41,7 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.json.putJsonArray
 import java.security.MessageDigest
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -64,6 +71,20 @@ class SecruxFindingReporter(
         val fileDocumentManager = FileDocumentManager.getInstance()
         val callGraphService = CallGraphService.getInstance(project)
         val graphSnapshot = callGraphService.getLastGraph()
+        val methodSummariesSnapshot = callGraphService.getLastMethodSummaries()
+        val typeHierarchySnapshot = callGraphService.getLastTypeHierarchy()
+        val frameworkModelSnapshot = callGraphService.getLastFrameworkModel()
+        val valueFlowTracer =
+            if (graphSnapshot != null && methodSummariesSnapshot != null) {
+                ValueFlowTracer(
+                    graph = graphSnapshot,
+                    summaries = methodSummariesSnapshot,
+                    typeHierarchy = typeHierarchySnapshot,
+                    frameworkModel = frameworkModelSnapshot,
+                )
+            } else {
+                null
+            }
         val enrichmentService = SecruxPsiUastEnrichmentService(project)
         val findings =
             buildJsonArray {
@@ -135,7 +156,7 @@ class SecruxFindingReporter(
                         } else {
                             null
                         }
-                    val dataflow =
+                    val baseDataflow =
                         if (sarifCodeFlows != null && graphSnapshot != null) {
                             buildDataflowFromCallChains(
                                 graph = graphSnapshot,
@@ -167,6 +188,52 @@ class SecruxFindingReporter(
                                 }
                                 putJsonArray("edges") {}
                             }
+                        }
+
+                    val valueFlows =
+                        if (graphSnapshot != null && methodSummariesSnapshot != null && valueFlowTracer != null) {
+                            buildValueFlowsForMatch(
+                                match = match,
+                                graph = graphSnapshot,
+                                methodSummaries = methodSummariesSnapshot,
+                                tracer = valueFlowTracer,
+                                fileDocumentManager = fileDocumentManager,
+                            )
+                        } else {
+                            null
+                        }
+
+                    val sarifValueFlowCodeFlows =
+                        if (valueFlows != null) {
+                            buildSarifCodeFlowsFromValueFlows(
+                                valueFlows = valueFlows,
+                                match = match,
+                                matchRelativePath = relativePath,
+                                matchLine = line,
+                                matchStartColumn = startColumn,
+                                matchEndColumn = endColumn,
+                                sinkLineText = sinkLineText,
+                            )
+                        } else {
+                            null
+                        }
+
+                    val mergedSarifCodeFlows =
+                        when {
+                            sarifCodeFlows == null -> sarifValueFlowCodeFlows
+                            sarifValueFlowCodeFlows == null -> sarifCodeFlows
+                            else ->
+                                buildJsonArray {
+                                    for (cf in sarifCodeFlows) add(cf)
+                                    for (cf in sarifValueFlowCodeFlows) add(cf)
+                                }
+                        }
+
+                    val dataflow =
+                        if (valueFlows != null) {
+                            attachValueFlows(baseDataflow, valueFlows)
+                        } else {
+                            baseDataflow
                         }
 
                     val enrichment =
@@ -209,7 +276,7 @@ class SecruxFindingReporter(
                                 if (enrichment != null) {
                                     put("enrichment", enrichment)
                                 }
-                                if (sarifCodeFlows != null) {
+                                if (mergedSarifCodeFlows != null) {
                                     putJsonObject("sarif") {
                                         put("version", "2.1.0")
                                         putJsonObject("result") {
@@ -245,7 +312,7 @@ class SecruxFindingReporter(
                                                 put("severity", severity.name.lowercase())
                                                 put("callChainMode", callChainMode.toSarifModeString())
                                             }
-                                            put("codeFlows", sarifCodeFlows)
+                                            put("codeFlows", mergedSarifCodeFlows)
                                         }
                                     }
                                 }
@@ -612,6 +679,221 @@ class SecruxFindingReporter(
         }
     }
 
+    private fun locationForOffset(
+        file: VirtualFile,
+        offset: Int,
+        fileDocumentManager: FileDocumentManager,
+    ): StepLocation {
+        return ReadAction.compute<StepLocation, RuntimeException> {
+            val rel = toProjectRelativePath(file.path)
+            val document = fileDocumentManager.getDocument(file) ?: return@compute StepLocation(rel, null, null, null, null)
+            val (line, col) = computeLineAndColumn(document, offset)
+            val text = getLineText(document, line).take(400)
+            StepLocation(path = rel, line = line, startColumn = col, endColumn = null, snippet = text)
+        }
+    }
+
+    private fun attachValueFlows(
+        dataflow: JsonObject,
+        valueFlows: JsonArray,
+    ): JsonObject =
+        buildJsonObject {
+            for ((k, v) in dataflow) {
+                put(k, v)
+            }
+            put("valueFlows", valueFlows)
+        }
+
+    private fun buildValueFlowsForMatch(
+        match: SinkMatch,
+        graph: CallGraph,
+        methodSummaries: MethodSummaryIndex,
+        tracer: ValueFlowTracer,
+        fileDocumentManager: FileDocumentManager,
+        maxArgsToTrace: Int = 3,
+        maxEdges: Int = 12,
+    ): JsonArray? {
+        val sinkMethodRef = match.enclosingMethodId?.let(MethodRef::fromIdOrNull) ?: return null
+        val sinkSummary = methodSummaries.summaries[sinkMethodRef] ?: return null
+
+        val sinkCalleeRef =
+            MethodRef(
+                classFqn = match.targetClassFqn,
+                name = match.targetMember,
+                paramCount = match.targetParamCount,
+            )
+
+        val callsite =
+            sinkSummary.calls
+                .filter { it.calleeId == sinkCalleeRef.id }
+                .minByOrNull { cs ->
+                    val off = cs.callOffset ?: Int.MAX_VALUE
+                    abs(off - match.startOffset)
+                }
+                ?: return null
+
+        val toTrace =
+            buildList<Pair<String, String>> {
+                callsite.receiver
+                    ?.takeIf { it.isNotBlank() && it != "UNKNOWN" }
+                    ?.let { token -> add("receiver" to token) }
+
+                val limit = minOf(callsite.args.size, maxArgsToTrace.coerceIn(0, 20))
+                for (idx in 0 until limit) {
+                    val token = callsite.args[idx]
+                    if (token.isBlank() || token == "UNKNOWN") continue
+                    add("arg$idx" to token)
+                }
+            }
+
+        if (toTrace.isEmpty()) return null
+
+        fun edgeLocation(edge: ValueFlowEdge): StepLocation? {
+            val edgePath = edge.filePath?.trim().takeIf { !it.isNullOrBlank() }
+            if (edgePath != null) {
+                val base = project.basePath
+                val absPath =
+                    when {
+                        edgePath.startsWith("/") -> edgePath
+                        base.isNullOrBlank() -> edgePath
+                        else -> "$base/$edgePath"
+                    }
+                val vf = LocalFileSystem.getInstance().findFileByPath(absPath)
+                if (vf != null) {
+                    return locationForOffset(vf, edge.offset ?: 0, fileDocumentManager)
+                }
+            }
+
+            val methodToOpen =
+                when (edge.kind) {
+                    ValueFlowEdgeKind.HEAP_STORE -> edge.to.method
+                    ValueFlowEdgeKind.CALL_ARG,
+                    ValueFlowEdgeKind.CALL_RECEIVER,
+                    ValueFlowEdgeKind.CALL_RETURN,
+                    -> edge.to.method
+                    ValueFlowEdgeKind.CALL_RESULT -> edge.from.method
+                    else -> edge.from.method
+                }
+            val loc = graph.methods[methodToOpen] ?: return null
+            val offset = edge.offset ?: loc.startOffset
+            return locationForOffset(loc.file, offset, fileDocumentManager)
+        }
+
+        val callsiteLocation =
+            callsite.callOffset?.let { off ->
+                val loc = graph.methods[sinkMethodRef] ?: return@let null
+                locationForOffset(loc.file, off, fileDocumentManager)
+            }
+
+        return buildJsonArray {
+            for ((label, token) in toTrace) {
+                val traces =
+                    tracer.traceToRoots(
+                        startMethod = sinkMethodRef,
+                        startToken = token,
+                        maxDepth = 10,
+                        maxStates = 1500,
+                        maxHeapWritersPerStep = 25,
+                        maxTraces = 3,
+                    )
+
+                if (traces.isEmpty()) {
+                    add(
+                        buildJsonObject {
+                            put("label", label)
+                            put("sinkCalleeId", sinkCalleeRef.id)
+                            put("startMethodId", sinkMethodRef.id)
+                            put("startToken", token)
+                            callsite.callOffset?.let { put("sinkCallOffset", it) }
+                            callsiteLocation?.let { loc ->
+                                putJsonObject("sinkCallLocation") {
+                                    loc.path?.let { put("path", it) }
+                                    loc.line?.let { put("line", it) }
+                                    loc.startColumn?.let { put("startColumn", it) }
+                                    loc.endColumn?.let { put("endColumn", it) }
+                                    loc.snippet?.let { put("snippet", it) }
+                                }
+                            }
+                            put("status", "NO_PATH")
+                        }
+                    )
+                    continue
+                }
+
+                for ((idx, trace) in traces.withIndex()) {
+                    val labelWithIndex = if (traces.size > 1) "$label#${idx + 1}" else label
+                    add(
+                        buildJsonObject {
+                            put("label", labelWithIndex)
+                            put("sinkCalleeId", sinkCalleeRef.id)
+                            put("startMethodId", sinkMethodRef.id)
+                            put("startToken", token)
+                            callsite.callOffset?.let { put("sinkCallOffset", it) }
+                            callsiteLocation?.let { loc ->
+                                putJsonObject("sinkCallLocation") {
+                                    loc.path?.let { put("path", it) }
+                                    loc.line?.let { put("line", it) }
+                                    loc.startColumn?.let { put("startColumn", it) }
+                                    loc.endColumn?.let { put("endColumn", it) }
+                                    loc.snippet?.let { put("snippet", it) }
+                                }
+                            }
+
+                            put("status", "OK")
+                            put("rootMethodId", trace.end.method.id)
+                            put("rootToken", trace.end.token)
+
+                            val rootLoc = locationForMethod(graph.methods[trace.end.method], fileDocumentManager)
+                            if (rootLoc.path != null || rootLoc.line != null) {
+                                putJsonObject("rootLocation") {
+                                    rootLoc.path?.let { put("path", it) }
+                                    rootLoc.line?.let { put("line", it) }
+                                    rootLoc.startColumn?.let { put("startColumn", it) }
+                                    rootLoc.endColumn?.let { put("endColumn", it) }
+                                    rootLoc.snippet?.let { put("snippet", it) }
+                                }
+                            }
+
+                            putJsonArray("edges") {
+                                val edges = trace.edges.take(maxEdges.coerceIn(1, 50))
+                                for (edge in edges) {
+                                    add(
+                                        buildJsonObject {
+                                            put("kind", edge.kind.name)
+                                            put("fromMethodId", edge.from.method.id)
+                                            put("fromToken", edge.from.token)
+                                            put("toMethodId", edge.to.method.id)
+                                            put("toToken", edge.to.token)
+                                            edge.offset?.let { put("offset", it) }
+                                            edge.details?.let { put("details", it) }
+                                            edgeLocation(edge)?.let { loc ->
+                                                putJsonObject("location") {
+                                                    loc.path?.let { put("path", it) }
+                                                    loc.line?.let { put("line", it) }
+                                                    loc.startColumn?.let { put("startColumn", it) }
+                                                    loc.endColumn?.let { put("endColumn", it) }
+                                                    loc.snippet?.let { put("snippet", it) }
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                                if (trace.edges.size > edges.size) {
+                                    add(
+                                        buildJsonObject {
+                                            put("kind", "TRUNCATED")
+                                            put("details", "+${trace.edges.size - edges.size}")
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+
     private fun buildDataflowFromCallChains(
         graph: CallGraph,
         chains: List<List<MethodRef>>,
@@ -785,6 +1067,114 @@ class SecruxFindingReporter(
                                                         endColumn = matchEndColumn,
                                                         snippet = sinkLineText
                                                     )
+                                            )
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    private fun buildSarifCodeFlowsFromValueFlows(
+        valueFlows: JsonArray,
+        match: SinkMatch,
+        matchRelativePath: String,
+        matchLine: Int,
+        matchStartColumn: Int,
+        matchEndColumn: Int?,
+        sinkLineText: String?,
+    ): JsonArray {
+        fun parseStepLocation(obj: JsonObject?): StepLocation =
+            if (obj == null) {
+                StepLocation(path = null, line = null, startColumn = null, endColumn = null, snippet = null)
+            } else {
+                StepLocation(
+                    path = obj["path"]?.jsonPrimitive?.contentOrNull,
+                    line = obj["line"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
+                    startColumn = obj["startColumn"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
+                    endColumn = obj["endColumn"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
+                    snippet = obj["snippet"]?.jsonPrimitive?.contentOrNull,
+                )
+            }
+
+        val sinkLocation =
+            StepLocation(
+                path = matchRelativePath,
+                line = matchLine,
+                startColumn = matchStartColumn,
+                endColumn = matchEndColumn,
+                snippet = sinkLineText,
+            )
+
+        return buildJsonArray {
+            for (flow in valueFlows) {
+                val obj = flow.jsonObject
+                val status = obj["status"]?.jsonPrimitive?.contentOrNull ?: continue
+                if (status != "OK") continue
+
+                val label = obj["label"]?.jsonPrimitive?.contentOrNull ?: "valueFlow"
+                val rootMethodId = obj["rootMethodId"]?.jsonPrimitive?.contentOrNull
+                val rootToken = obj["rootToken"]?.jsonPrimitive?.contentOrNull
+                val rootLoc = parseStepLocation(obj["rootLocation"]?.jsonObject)
+                val sinkCallLoc = parseStepLocation(obj["sinkCallLocation"]?.jsonObject)
+
+                val edges =
+                    obj["edges"]?.jsonArray.orEmpty()
+                        .mapNotNull { it.jsonObject }
+                        .filter { it["kind"]?.jsonPrimitive?.contentOrNull != "TRUNCATED" }
+
+                add(
+                    buildJsonObject {
+                        putJsonArray("threadFlows") {
+                            add(
+                                buildJsonObject {
+                                    putJsonArray("locations") {
+                                        if (rootLoc.path != null || rootLoc.line != null) {
+                                            val rootMsg =
+                                                buildString {
+                                                    append("valueFlow[").append(label).append("] root")
+                                                    if (!rootMethodId.isNullOrBlank() || !rootToken.isNullOrBlank()) {
+                                                        append(": ")
+                                                        rootMethodId?.let { append(it).append(" ") }
+                                                        rootToken?.let { append(it) }
+                                                    }
+                                                }
+                                            add(buildThreadFlowLocation(message = rootMsg.trim(), location = rootLoc))
+                                        }
+
+                                        for (edge in edges.asReversed()) {
+                                            val kind = edge["kind"]?.jsonPrimitive?.contentOrNull ?: continue
+                                            val fromMethodId = edge["fromMethodId"]?.jsonPrimitive?.contentOrNull
+                                            val fromToken = edge["fromToken"]?.jsonPrimitive?.contentOrNull
+                                            val toMethodId = edge["toMethodId"]?.jsonPrimitive?.contentOrNull
+                                            val toToken = edge["toToken"]?.jsonPrimitive?.contentOrNull
+                                            val details = edge["details"]?.jsonPrimitive?.contentOrNull
+                                            val message =
+                                                buildString {
+                                                    append("valueFlow[").append(label).append("] ")
+                                                    append(kind).append(": ")
+                                                    if (!toMethodId.isNullOrBlank() || !toToken.isNullOrBlank()) {
+                                                        append(toMethodId.orEmpty()).append(" ").append(toToken.orEmpty()).append(" -> ")
+                                                    }
+                                                    append(fromMethodId.orEmpty()).append(" ").append(fromToken.orEmpty())
+                                                    if (!details.isNullOrBlank()) append(" (").append(details).append(")")
+                                                }.trim()
+                                            val loc = parseStepLocation(edge["location"]?.jsonObject)
+                                            add(buildThreadFlowLocation(message = message, location = loc))
+                                        }
+
+                                        if (sinkCallLoc.path != null || sinkCallLoc.line != null) {
+                                            add(buildThreadFlowLocation(message = "valueFlow[$label] sinkCall", location = sinkCallLoc))
+                                        }
+
+                                        add(
+                                            buildThreadFlowLocation(
+                                                message = "sink: ${match.targetClassFqn}#${match.targetMember}",
+                                                location = sinkLocation,
                                             )
                                         )
                                     }

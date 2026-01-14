@@ -2,6 +2,12 @@ package com.securitycrux.secrux.intellij.valueflow
 
 import com.securitycrux.secrux.intellij.callgraph.MethodRef
 
+data class AliasEdge(
+    val left: String,
+    val right: String,
+    val offset: Int?,
+)
+
 data class FieldStore(
     val targetField: String,
     val value: String,
@@ -25,6 +31,7 @@ data class CallSiteSummary(
 data class MethodSummary(
     val fieldsRead: Set<String> = emptySet(),
     val fieldsWritten: Set<String> = emptySet(),
+    val aliases: List<AliasEdge> = emptyList(),
     val stores: List<FieldStore> = emptyList(),
     val loads: List<FieldLoad> = emptyList(),
     val calls: List<CallSiteSummary> = emptyList(),

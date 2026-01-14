@@ -4,11 +4,15 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBScrollPane
 import com.securitycrux.secrux.intellij.valueflow.MethodSummaryIndex
+import com.securitycrux.secrux.intellij.valueflow.ValueFlowEdge
+import com.securitycrux.secrux.intellij.valueflow.ValueFlowNode
+import com.securitycrux.secrux.intellij.valueflow.ValueFlowTrace
 import com.securitycrux.secrux.intellij.i18n.SecruxBundle
 import java.awt.Dimension
 import java.awt.event.MouseAdapter
@@ -31,12 +35,30 @@ class CallChainsDialog(
 
     data class MethodStep(val ref: MethodRef) : Step
 
+    data class ValueFlowTraceItem(
+        val label: String,
+        val trace: ValueFlowTrace?,
+    )
+
+    data class ValueFlowGroupStep(
+        val label: String,
+    ) : Step
+
+    data class ValueFlowEdgeStep(
+        val edge: ValueFlowEdge,
+    ) : Step
+
+    data class ValueFlowRootStep(
+        val node: ValueFlowNode,
+    ) : Step
+
     data class SinkStep(
         val label: String,
         val file: VirtualFile,
         val startOffset: Int,
         val line: Int?,
         val column: Int?,
+        val valueFlows: List<ValueFlowTraceItem> = emptyList(),
     ) : Step
 
     data class Section(
@@ -85,7 +107,13 @@ class CallChainsDialog(
                 val chainNode = DefaultMutableTreeNode(ChainNode(index = index + 1, stepsCount = chain.size))
                 sectionNode.add(chainNode)
                 for (step in chain) {
-                    chainNode.add(DefaultMutableTreeNode(step))
+                    if (step is SinkStep) {
+                        val sinkNode = DefaultMutableTreeNode(step)
+                        chainNode.add(sinkNode)
+                        addValueFlowTraceNodes(sinkNode, step)
+                    } else {
+                        chainNode.add(DefaultMutableTreeNode(step))
+                    }
                 }
             }
         }
@@ -130,6 +158,7 @@ class CallChainsDialog(
                             append("<b>").append(step.ref.id).append("</b><br/>")
                             append("reads=").append(summary.fieldsRead.size)
                             append(" writes=").append(summary.fieldsWritten.size)
+                            append(" aliases=").append(summary.aliases.size)
                             append(" stores=").append(summary.stores.size)
                             append(" loads=").append(summary.loads.size)
                             append(" calls=").append(summary.calls.size)
@@ -138,6 +167,11 @@ class CallChainsDialog(
                             }
                         }
 
+                    val aliases =
+                        summary.aliases.take(6).joinToString("<br/>") { a ->
+                            val loc = a.offset?.let { " @${it}" }.orEmpty()
+                            "${renderToken(a.left)} &lt;-&gt; ${renderToken(a.right)}$loc"
+                        }
                     val stores =
                         summary.stores.take(6).joinToString("<br/>") { s ->
                             val loc = s.offset?.let { " @${it}" }.orEmpty()
@@ -163,6 +197,9 @@ class CallChainsDialog(
                         if (callsToNext.isNotEmpty()) {
                             append("<br/><b>calls(to next)</b><br/>").append(calls)
                         }
+                        if (summary.aliases.isNotEmpty()) {
+                            append("<br/><b>aliases</b><br/>").append(aliases)
+                        }
                         if (summary.stores.isNotEmpty()) {
                             append("<br/><b>stores</b><br/>").append(stores)
                         }
@@ -186,44 +223,61 @@ class CallChainsDialog(
                             val path = getPathForLocation(e.x, e.y) ?: return
                             val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return
                             val step = node.userObject as? Step ?: return
-                            val chainNode = node.parent as? DefaultMutableTreeNode
-                            val chainSteps =
-                                chainNode
-                                    ?.children()
-                                    ?.toList()
-                                    ?.mapNotNull { (it as? DefaultMutableTreeNode)?.userObject as? Step }
-                                    .orEmpty()
+                            val (file, offset) =
+                                when (step) {
+                                    is ValueFlowGroupStep -> null to null
+                                    is ValueFlowEdgeStep -> resolveValueFlowEdgeLocation(step.edge)
+                                    is ValueFlowRootStep -> {
+                                        val loc = graph.methods[step.node.method]
+                                        loc?.file to loc?.startOffset
+                                    }
 
-                            val idx = chainSteps.indexOf(step)
-                            val callSite =
-                                when {
-                                    idx < 0 || idx >= chainSteps.lastIndex -> null
                                     else -> {
-                                        val next = chainSteps[idx + 1]
-                                        when (step) {
-                                            is MethodStep ->
-                                                when (next) {
-                                                    is MethodStep -> graph.callSites[CallEdge(caller = step.ref, callee = next.ref)]
-                                                    is SinkStep -> CallSiteLocation(file = next.file, startOffset = next.startOffset)
-                                                }
+                                        val chainNode = node.parent as? DefaultMutableTreeNode
+                                        val chainSteps =
+                                            chainNode
+                                                ?.children()
+                                                ?.toList()
+                                                ?.mapNotNull { (it as? DefaultMutableTreeNode)?.userObject as? Step }
+                                                .orEmpty()
 
-                                            is SinkStep -> null
-                                        }
+                                        val idx = chainSteps.indexOf(step)
+                                        val callSite =
+                                            when {
+                                                idx < 0 || idx >= chainSteps.lastIndex -> null
+                                                else -> {
+                                                    val next = chainSteps[idx + 1]
+                                                    when (step) {
+                                                        is MethodStep ->
+                                                            when (next) {
+                                                                is MethodStep -> graph.callSites[CallEdge(caller = step.ref, callee = next.ref)]
+                                                                is SinkStep -> CallSiteLocation(file = next.file, startOffset = next.startOffset)
+                                                                else -> null
+                                                            }
+
+                                                        is SinkStep -> null
+                                                        else -> null
+                                                    }
+                                                }
+                                            }
+
+                                        val file =
+                                            callSite?.file
+                                                ?: when (step) {
+                                                    is MethodStep -> graph.methods[step.ref]?.file
+                                                    is SinkStep -> step.file
+                                                    else -> null
+                                                }
+                                        val offset =
+                                            callSite?.startOffset
+                                                ?: when (step) {
+                                                    is MethodStep -> graph.methods[step.ref]?.startOffset
+                                                    is SinkStep -> step.startOffset
+                                                    else -> null
+                                                }
+                                        file to offset
                                     }
                                 }
-
-                            val file =
-                                callSite?.file
-                                    ?: when (step) {
-                                        is MethodStep -> graph.methods[step.ref]?.file
-                                        is SinkStep -> step.file
-                                    }
-                            val offset =
-                                callSite?.startOffset
-                                    ?: when (step) {
-                                        is MethodStep -> graph.methods[step.ref]?.startOffset
-                                        is SinkStep -> step.startOffset
-                                    }
                             if (file == null || offset == null) {
                                 Messages.showInfoMessage(
                                     project,
@@ -247,7 +301,71 @@ class CallChainsDialog(
         return tree
     }
 
-    private class CallChainsTreeCellRenderer(
+    private fun addValueFlowTraceNodes(parent: DefaultMutableTreeNode, sinkStep: SinkStep) {
+        if (sinkStep.valueFlows.isEmpty()) return
+
+        for (item in sinkStep.valueFlows) {
+            val traceNode = DefaultMutableTreeNode(ValueFlowGroupStep("valueFlow: ${item.label}"))
+            parent.add(traceNode)
+
+            val trace = item.trace
+            if (trace == null) {
+                traceNode.add(DefaultMutableTreeNode(InfoNode("<no path>")))
+                continue
+            }
+
+            val edges = trace.edges.take(12)
+            for (edge in edges) {
+                traceNode.add(DefaultMutableTreeNode(ValueFlowEdgeStep(edge)))
+            }
+            if (trace.edges.size > edges.size) {
+                traceNode.add(DefaultMutableTreeNode(InfoNode("... +${trace.edges.size - edges.size}")))
+            }
+            traceNode.add(DefaultMutableTreeNode(ValueFlowRootStep(trace.end)))
+        }
+    }
+
+    private fun resolveValueFlowEdgeLocation(edge: ValueFlowEdge): Pair<VirtualFile?, Int?> {
+        edge.filePath?.takeIf { it.isNotBlank() }?.let { relOrAbs ->
+            val vf = resolveVirtualFile(relOrAbs)
+            if (vf != null) {
+                return vf to (edge.offset ?: 0)
+            }
+        }
+
+        val methodToOpen =
+            when (edge.kind) {
+                com.securitycrux.secrux.intellij.valueflow.ValueFlowEdgeKind.HEAP_STORE -> edge.to.method
+                com.securitycrux.secrux.intellij.valueflow.ValueFlowEdgeKind.CALL_ARG,
+                com.securitycrux.secrux.intellij.valueflow.ValueFlowEdgeKind.CALL_RECEIVER,
+                com.securitycrux.secrux.intellij.valueflow.ValueFlowEdgeKind.CALL_RETURN,
+                -> edge.to.method
+                com.securitycrux.secrux.intellij.valueflow.ValueFlowEdgeKind.CALL_RESULT -> edge.from.method
+                else -> edge.from.method
+            }
+        val loc = graph.methods[methodToOpen] ?: return null to null
+        val offset = edge.offset ?: loc.startOffset
+        return loc.file to offset
+    }
+
+    private fun resolveVirtualFile(path: String): VirtualFile? {
+        val trimmed = path.trim().replace('\\', '/')
+        if (trimmed.isBlank()) return null
+
+        val isAbsolute =
+            trimmed.startsWith("/") ||
+                trimmed.matches(Regex("^[A-Za-z]:/.*"))
+        val absolute =
+            if (isAbsolute) {
+                trimmed
+            } else {
+                val base = project.basePath?.replace('\\', '/')?.trimEnd('/') ?: return null
+                "$base/$trimmed"
+            }
+        return LocalFileSystem.getInstance().findFileByPath(absolute)
+    }
+
+    private inner class CallChainsTreeCellRenderer(
         private val project: Project,
         private val graph: CallGraph,
         private val methodSummaries: MethodSummaryIndex?,
@@ -269,6 +387,31 @@ class CallChainsDialog(
                     SimpleTextAttributes.REGULAR_ATTRIBUTES
                 )
                 is InfoNode -> append(obj.text, SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                is ValueFlowGroupStep -> append(obj.label, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+                is ValueFlowEdgeStep -> {
+                    val edge = obj.edge
+                    append("[${edge.kind}]", SimpleTextAttributes.GRAYED_BOLD_ATTRIBUTES)
+                    append(" ", SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                    append("${shortMethod(edge.from.method)} ${edge.from.token}", SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                    append(" -> ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    append("${shortMethod(edge.to.method)} ${edge.to.token}", SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                    edge.offset?.let { append(" @${it}", SimpleTextAttributes.GRAYED_ATTRIBUTES) }
+
+                    val (file, _) = resolveValueFlowEdgeLocation(edge)
+                    if (file != null) {
+                        val relPath = relativePath(project.basePath, file.path)
+                        append("  $relPath", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    }
+                }
+                is ValueFlowRootStep -> {
+                    append("root:", SimpleTextAttributes.GRAYED_BOLD_ATTRIBUTES)
+                    append(" ${shortMethod(obj.node.method)} ${obj.node.token}", SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                    val filePath = graph.methods[obj.node.method]?.file?.path
+                    if (filePath != null) {
+                        val relPath = relativePath(project.basePath, filePath)
+                        append("  $relPath", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    }
+                }
                 is MethodStep -> {
                     append(obj.ref.id, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                     val chainNode = node.parent as? DefaultMutableTreeNode
@@ -300,6 +443,7 @@ class CallChainsDialog(
                             "  " +
                                 SecruxBundle.message(
                                     "dialog.callChains.valueFlowStats",
+                                    summary.aliases.size,
                                     summary.stores.size,
                                     summary.loads.size,
                                     summary.calls.size,
@@ -314,7 +458,7 @@ class CallChainsDialog(
                                 when (next) {
                                     is MethodStep -> graph.callSites[CallEdge(caller = obj.ref, callee = next.ref)]
                                     is SinkStep -> CallSiteLocation(file = next.file, startOffset = next.startOffset)
-                                    null -> null
+                                    else -> null
                                 }
                             }
                         }
@@ -344,6 +488,11 @@ class CallChainsDialog(
                 }
                 else -> append(obj?.toString().orEmpty(), SimpleTextAttributes.REGULAR_ATTRIBUTES)
             }
+        }
+
+        private fun shortMethod(ref: MethodRef): String {
+            val clazz = ref.classFqn.substringAfterLast('.')
+            return "$clazz#${ref.name}/${ref.paramCount}"
         }
 
         private fun relativePath(

@@ -28,6 +28,7 @@ import com.intellij.psi.util.InheritanceUtil
 import com.securitycrux.secrux.intellij.i18n.SecruxBundle
 import com.securitycrux.secrux.intellij.settings.SecruxProjectSettings
 import com.securitycrux.secrux.intellij.util.SecruxNotifications
+import com.securitycrux.secrux.intellij.valueflow.AliasEdge
 import com.securitycrux.secrux.intellij.valueflow.BeanDefinition
 import com.securitycrux.secrux.intellij.valueflow.BeanKind
 import com.securitycrux.secrux.intellij.valueflow.CallSiteSummary
@@ -69,6 +70,7 @@ import org.jetbrains.uast.UParenthesizedExpression
 import org.jetbrains.uast.toUElementOfType
 import org.jetbrains.uast.visitor.AbstractUastVisitor
 import java.io.File
+import java.security.MessageDigest
 
 @Service(Service.Level.PROJECT)
 class CallGraphService(
@@ -109,11 +111,18 @@ class CallGraphService(
         val resultToken: String?,
     )
 
+    private data class RawAliasEdge(
+        val leftToken: String,
+        val rightToken: String,
+        val offset: Int?,
+    )
+
     private data class BuildResult(
         val graph: CallGraph,
         val typeHierarchy: TypeHierarchyIndex,
         val methodSummaries: MethodSummaryIndex,
         val frameworkModel: FrameworkModelIndex,
+        val projectFingerprint: String,
     )
 
     private val log = Logger.getInstance(CallGraphService::class.java)
@@ -144,6 +153,12 @@ class CallGraphService(
         ownerFqn: String,
         fieldName: String,
     ): String = "$base:$ownerFqn#$fieldName"
+
+    private fun heapFieldKey(
+        baseToken: String,
+        ownerFqn: String,
+        fieldName: String,
+    ): String = "HEAP(${baseToken.trim()}):$ownerFqn#$fieldName"
 
     private class UnionFind {
         private val parent = hashMapOf<String, String>()
@@ -191,10 +206,10 @@ class CallGraphService(
                         lastTypeHierarchy = result.typeHierarchy
                         lastMethodSummaries = result.methodSummaries
                         lastFrameworkModel = result.frameworkModel
-                        persistGraph(result.graph)
-                        persistTypeHierarchy(result.typeHierarchy)
-                        persistMethodSummaries(result.methodSummaries)
-                        persistFrameworkModel(result.frameworkModel)
+                        persistGraph(result.graph, result.projectFingerprint)
+                        persistTypeHierarchy(result.typeHierarchy, result.projectFingerprint)
+                        persistMethodSummaries(result.methodSummaries, result.projectFingerprint)
+                        persistFrameworkModel(result.frameworkModel, result.projectFingerprint)
 
                         ApplicationManager.getApplication().invokeLater {
                             project.messageBus.syncPublisher(CallGraphListener.TOPIC).onCallGraphUpdated(result.graph)
@@ -210,14 +225,24 @@ class CallGraphService(
             object : Task.Backgroundable(project, SecruxBundle.message("task.reloadCallGraph"), true) {
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = true
-                    val graph = loadGraph()
+                    val scope = GlobalSearchScope.projectScope(project)
+                    val fileIndex = ProjectFileIndex.getInstance(project)
+                    val excludedPathRegex = parseExcludedPathRegex()
+                    val expectedFingerprint =
+                        runCatching {
+                            computeProjectFingerprint(
+                                collectSourceFiles(scope = scope, fileIndex = fileIndex, excludedPathRegex = excludedPathRegex),
+                            )
+                        }.getOrNull()
+
+                    val graph = loadGraph(expectedFingerprint = expectedFingerprint)
                     if (graph == null) {
-                        SecruxNotifications.error(project, SecruxBundle.message("notification.callGraphCacheNotFound"))
+                        SecruxNotifications.error(project, "Call graph cache is missing or stale; please rebuild.")
                         return
                     }
-                    val typeHierarchy = loadTypeHierarchy()
-                    val methodSummaries = loadMethodSummaries()
-                    val frameworkModel = loadFrameworkModel()
+                    val typeHierarchy = loadTypeHierarchy(expectedFingerprint = expectedFingerprint)
+                    val methodSummaries = loadMethodSummaries(expectedFingerprint = expectedFingerprint)
+                    val frameworkModel = loadFrameworkModel(expectedFingerprint = expectedFingerprint)
                     lastGraph = graph
                     lastTypeHierarchy = typeHierarchy
                     lastMethodSummaries = methodSummaries
@@ -249,6 +274,9 @@ class CallGraphService(
         lastTypeHierarchy = null
         methodSummaryCacheFile()?.let { file ->
             runCatching { file.delete() }
+        }
+        methodSummaryShardsDir()?.let { dir ->
+            runCatching { dir.deleteRecursively() }
         }
         lastMethodSummaries = null
         frameworkModelCacheFile()?.let { file ->
@@ -298,13 +326,14 @@ class CallGraphService(
         return results
     }
 
-    private fun persistGraph(graph: CallGraph) {
+    private fun persistGraph(graph: CallGraph, projectFingerprint: String?) {
         val file = cacheFile() ?: return
         runCatching {
             file.parentFile?.mkdirs()
             val payload =
                 buildJsonObject {
                     put("formatVersion", 3)
+                    projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
                     put("generatedAtEpochMs", System.currentTimeMillis())
                     putJsonObject("stats") {
                         put("filesScanned", graph.stats.filesScanned)
@@ -374,13 +403,14 @@ class CallGraphService(
         }
     }
 
-    private fun persistTypeHierarchy(index: TypeHierarchyIndex) {
+    private fun persistTypeHierarchy(index: TypeHierarchyIndex, projectFingerprint: String?) {
         val file = typeHierarchyCacheFile() ?: return
         runCatching {
             file.parentFile?.mkdirs()
             val payload =
                 buildJsonObject {
                     put("formatVersion", 1)
+                    projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
                     put("generatedAtEpochMs", System.currentTimeMillis())
                     putJsonObject("stats") {
                         put("typesIndexed", index.stats.typesIndexed)
@@ -406,13 +436,21 @@ class CallGraphService(
         }
     }
 
-    private fun persistMethodSummaries(index: MethodSummaryIndex) {
+    private fun persistMethodSummaries(index: MethodSummaryIndex, projectFingerprint: String?) {
         val file = methodSummaryCacheFile() ?: return
         runCatching {
             file.parentFile?.mkdirs()
-            val payload =
+            val shardDir = methodSummaryShardsDir()
+            val shardSpec = shardMethodSummaries(index)
+            if (shardDir != null) {
+                runCatching { shardDir.deleteRecursively() }
+                shardDir.mkdirs()
+            }
+
+            val manifest =
                 buildJsonObject {
-                    put("formatVersion", 2)
+                    put("formatVersion", 4)
+                    projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
                     put("generatedAtEpochMs", System.currentTimeMillis())
                     putJsonObject("stats") {
                         put("methodsIndexed", index.stats.methodsIndexed)
@@ -421,72 +459,110 @@ class CallGraphService(
                         put("fieldWrites", index.stats.fieldWrites)
                         put("distinctFields", index.stats.distinctFields)
                     }
-                    putJsonArray("methods") {
-                        for ((ref, summary) in index.summaries) {
+                    putJsonArray("shards") {
+                        for (shard in shardSpec) {
                             add(
                                 buildJsonObject {
-                                    put("id", ref.id)
-                                    putJsonArray("reads") {
-                                        for (f in summary.fieldsRead) add(JsonPrimitive(f))
-                                    }
-                                    putJsonArray("writes") {
-                                        for (f in summary.fieldsWritten) add(JsonPrimitive(f))
-                                    }
-                                    putJsonArray("stores") {
-                                        for (s in summary.stores) {
-                                            add(
-                                                buildJsonObject {
-                                                    put("targetField", s.targetField)
-                                                    put("value", s.value)
-                                                    s.offset?.let { put("offset", it) }
-                                                }
-                                            )
-                                        }
-                                    }
-                                    putJsonArray("loads") {
-                                        for (l in summary.loads) {
-                                            add(
-                                                buildJsonObject {
-                                                    put("target", l.target)
-                                                    put("sourceField", l.sourceField)
-                                                    l.offset?.let { put("offset", it) }
-                                                }
-                                            )
-                                        }
-                                    }
-                                    putJsonArray("calls") {
-                                        for (c in summary.calls) {
-                                            add(
-                                                buildJsonObject {
-                                                    c.calleeId?.let { put("calleeId", it) }
-                                                    c.callOffset?.let { put("callOffset", it) }
-                                                    c.receiver?.let { put("receiver", it) }
-                                                    putJsonArray("args") {
-                                                        for (a in c.args) add(JsonPrimitive(a))
-                                                    }
-                                                    c.result?.let { put("result", it) }
-                                                }
-                                            )
-                                        }
-                                    }
+                                    put("key", shard.key)
+                                    put("file", shard.file)
+                                    put("methodCount", shard.methodCount)
                                 }
                             )
                         }
                     }
                 }
-            file.writeText(payload.toString(), Charsets.UTF_8)
+
+            for (shard in shardSpec) {
+                val target =
+                    shardDir?.let { File(it, shard.file.substringAfterLast('/')) }
+                        ?: File(file.parentFile, shard.file)
+                target.parentFile?.mkdirs()
+                val payload =
+                    buildJsonObject {
+                        put("formatVersion", 1)
+                        projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
+                        put("generatedAtEpochMs", System.currentTimeMillis())
+                        putJsonArray("methods") {
+                            for ((ref, summary) in shard.methods) {
+                                add(
+                                    buildJsonObject {
+                                        put("id", ref.id)
+                                        putJsonArray("reads") {
+                                            for (f in summary.fieldsRead) add(JsonPrimitive(f))
+                                        }
+                                        putJsonArray("writes") {
+                                            for (f in summary.fieldsWritten) add(JsonPrimitive(f))
+                                        }
+                                        putJsonArray("aliases") {
+                                            for (a in summary.aliases) {
+                                                add(
+                                                    buildJsonObject {
+                                                        put("left", a.left)
+                                                        put("right", a.right)
+                                                        a.offset?.let { put("offset", it) }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        putJsonArray("stores") {
+                                            for (s in summary.stores) {
+                                                add(
+                                                    buildJsonObject {
+                                                        put("targetField", s.targetField)
+                                                        put("value", s.value)
+                                                        s.offset?.let { put("offset", it) }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        putJsonArray("loads") {
+                                            for (l in summary.loads) {
+                                                add(
+                                                    buildJsonObject {
+                                                        put("target", l.target)
+                                                        put("sourceField", l.sourceField)
+                                                        l.offset?.let { put("offset", it) }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        putJsonArray("calls") {
+                                            for (c in summary.calls) {
+                                                add(
+                                                    buildJsonObject {
+                                                        c.calleeId?.let { put("calleeId", it) }
+                                                        c.callOffset?.let { put("callOffset", it) }
+                                                        c.receiver?.let { put("receiver", it) }
+                                                        putJsonArray("args") {
+                                                            for (a in c.args) add(JsonPrimitive(a))
+                                                        }
+                                                        c.result?.let { put("result", it) }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                target.writeText(payload.toString(), Charsets.UTF_8)
+            }
+
+            file.writeText(manifest.toString(), Charsets.UTF_8)
         }.onFailure { e ->
             log.warn("Failed to persist method summaries", e)
         }
     }
 
-    private fun persistFrameworkModel(index: FrameworkModelIndex) {
+    private fun persistFrameworkModel(index: FrameworkModelIndex, projectFingerprint: String?) {
         val file = frameworkModelCacheFile() ?: return
         runCatching {
             file.parentFile?.mkdirs()
             val payload =
                 buildJsonObject {
-                    put("formatVersion", 1)
+                    put("formatVersion", 2)
+                    projectFingerprint?.takeIf { it.isNotBlank() }?.let { put("projectFingerprint", it) }
                     put("generatedAtEpochMs", System.currentTimeMillis())
                     putJsonObject("stats") {
                         put("beans", index.stats.beans)
@@ -515,6 +591,8 @@ class CallGraphService(
                                     put("kind", inj.kind.name)
                                     put("targetTypeFqn", inj.targetTypeFqn)
                                     inj.name?.let { put("name", it) }
+                                    inj.methodId?.let { put("methodId", it) }
+                                    inj.paramIndex?.let { put("paramIndex", it) }
                                     inj.filePath?.let { put("filePath", it) }
                                     inj.startOffset?.let { put("startOffset", it) }
                                 }
@@ -528,13 +606,15 @@ class CallGraphService(
         }
     }
 
-    private fun loadGraph(): CallGraph? {
+    private fun loadGraph(expectedFingerprint: String? = null): CallGraph? {
         val file = cacheFile() ?: return null
         if (!file.exists()) return null
 
         val basePath = project.basePath ?: return null
         val body = file.readText(Charsets.UTF_8)
         val root = json.parseToJsonElement(body).jsonObject
+        val cachedFingerprint = root["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+        if (expectedFingerprint != null && cachedFingerprint != null && cachedFingerprint != expectedFingerprint) return null
 
         val methods =
             linkedMapOf<MethodRef, MethodLocation>()
@@ -647,12 +727,14 @@ class CallGraphService(
         )
     }
 
-    private fun loadTypeHierarchy(): TypeHierarchyIndex? {
+    private fun loadTypeHierarchy(expectedFingerprint: String? = null): TypeHierarchyIndex? {
         val file = typeHierarchyCacheFile() ?: return null
         if (!file.exists()) return null
 
         val body = file.readText(Charsets.UTF_8)
         val root = json.parseToJsonElement(body).jsonObject
+        val cachedFingerprint = root["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+        if (expectedFingerprint != null && cachedFingerprint != null && cachedFingerprint != expectedFingerprint) return null
 
         val edges =
             root["edges"]?.jsonArray.orEmpty()
@@ -691,15 +773,249 @@ class CallGraphService(
         return TypeHierarchyIndex(edges = edges, stats = stats)
     }
 
-    private fun loadMethodSummaries(): MethodSummaryIndex? {
+    private fun loadMethodSummaries(expectedFingerprint: String? = null): MethodSummaryIndex? {
         val file = methodSummaryCacheFile() ?: return null
         if (!file.exists()) return null
 
         val body = file.readText(Charsets.UTF_8)
         val root = json.parseToJsonElement(body).jsonObject
+        val cachedFingerprint = root["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+        if (expectedFingerprint != null && cachedFingerprint != null && cachedFingerprint != expectedFingerprint) return null
 
         val summaries = linkedMapOf<MethodRef, MethodSummary>()
-        val methodsArray = root["methods"]?.jsonArray.orEmpty()
+
+        val shards = root["shards"]?.jsonArray
+        if (shards != null) {
+            val basePath = project.basePath ?: return null
+            val shardDir = methodSummaryShardsDir()
+            for (entry in shards) {
+                val obj = entry.jsonObject
+                val rel = obj["file"]?.jsonPrimitive?.content ?: continue
+                val resolved =
+                    when {
+                        shardDir != null -> File(shardDir, rel.substringAfterLast('/'))
+                        else -> File(basePath, ".idea/secrux/$rel")
+                    }
+                if (!resolved.exists()) return null
+                val shardBody = resolved.readText(Charsets.UTF_8)
+                val shardRoot = json.parseToJsonElement(shardBody).jsonObject
+                val shardFingerprint = shardRoot["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+                if (expectedFingerprint != null && shardFingerprint != null && shardFingerprint != expectedFingerprint) return null
+                val methods = shardRoot["methods"]?.jsonArray.orEmpty()
+                readMethodSummaryEntries(methods, summaries)
+            }
+        } else {
+            val methodsArray = root["methods"]?.jsonArray.orEmpty()
+            readMethodSummaryEntries(methodsArray, summaries)
+        }
+
+        val statsObj = root["stats"]?.jsonObject
+        val stats =
+            if (statsObj != null) {
+                val methodsWithFieldAccess =
+                    summaries.values.count { it.fieldsRead.isNotEmpty() || it.fieldsWritten.isNotEmpty() || it.stores.isNotEmpty() || it.loads.isNotEmpty() }
+                val distinctFields =
+                    summaries.values
+                        .flatMap { it.fieldsRead + it.fieldsWritten + it.stores.map { s -> s.targetField } + it.loads.map { l -> l.sourceField } }
+                        .toSet()
+                MethodSummaryStats(
+                    methodsIndexed = statsObj["methodsIndexed"]?.jsonPrimitive?.int ?: 0,
+                    methodsWithFieldAccess = statsObj["methodsWithFieldAccess"]?.jsonPrimitive?.int ?: methodsWithFieldAccess,
+                    fieldReads = statsObj["fieldReads"]?.jsonPrimitive?.int ?: summaries.values.sumOf { it.fieldsRead.size },
+                    fieldWrites = statsObj["fieldWrites"]?.jsonPrimitive?.int ?: summaries.values.sumOf { it.fieldsWritten.size },
+                    distinctFields = statsObj["distinctFields"]?.jsonPrimitive?.int ?: distinctFields.size,
+                )
+            } else {
+                val distinctFields =
+                    summaries.values
+                        .asSequence()
+                        .flatMap { s ->
+                            sequenceOf(
+                                s.fieldsRead.asSequence(),
+                                s.fieldsWritten.asSequence(),
+                                s.stores.asSequence().map { it.targetField },
+                                s.loads.asSequence().map { it.sourceField },
+                            ).flatten()
+                        }
+                        .toSet()
+                MethodSummaryStats(
+                    methodsIndexed = summaries.size,
+                    methodsWithFieldAccess = summaries.values.count { it.fieldsRead.isNotEmpty() || it.fieldsWritten.isNotEmpty() || it.stores.isNotEmpty() || it.loads.isNotEmpty() },
+                    fieldReads = summaries.values.sumOf { it.fieldsRead.size },
+                    fieldWrites = summaries.values.sumOf { it.fieldsWritten.size },
+                    distinctFields = distinctFields.size,
+                )
+            }
+
+        return MethodSummaryIndex(summaries = summaries, stats = stats)
+    }
+
+    private fun loadFrameworkModel(expectedFingerprint: String? = null): FrameworkModelIndex? {
+        val file = frameworkModelCacheFile() ?: return null
+        if (!file.exists()) return null
+
+        val body = file.readText(Charsets.UTF_8)
+        val root = json.parseToJsonElement(body).jsonObject
+        val cachedFingerprint = root["projectFingerprint"]?.jsonPrimitive?.contentOrNull
+        if (expectedFingerprint != null && cachedFingerprint != null && cachedFingerprint != expectedFingerprint) return null
+
+        val beans =
+            root["beans"]?.jsonArray.orEmpty()
+                .mapNotNull { elem ->
+                    val obj = elem.jsonObject
+                    val typeFqn = obj["typeFqn"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val kindStr = obj["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val kind = runCatching { BeanKind.valueOf(kindStr) }.getOrNull() ?: return@mapNotNull null
+                    val source = obj["source"]?.jsonPrimitive?.contentOrNull
+                    val filePath = obj["filePath"]?.jsonPrimitive?.contentOrNull
+                    val startOffset = obj["startOffset"]?.jsonPrimitive?.int
+                    BeanDefinition(
+                        typeFqn = typeFqn,
+                        kind = kind,
+                        source = source,
+                        filePath = filePath,
+                        startOffset = startOffset,
+                    )
+                }
+
+        val injections =
+            root["injections"]?.jsonArray.orEmpty()
+                .mapNotNull { elem ->
+                    val obj = elem.jsonObject
+                    val ownerClassFqn = obj["ownerClassFqn"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val kindStr = obj["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val kind = runCatching { InjectionKind.valueOf(kindStr) }.getOrNull() ?: return@mapNotNull null
+                    val targetTypeFqn = obj["targetTypeFqn"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val name = obj["name"]?.jsonPrimitive?.contentOrNull
+                    val methodId = obj["methodId"]?.jsonPrimitive?.contentOrNull
+                    val paramIndex = obj["paramIndex"]?.jsonPrimitive?.int
+                    val filePath = obj["filePath"]?.jsonPrimitive?.contentOrNull
+                    val startOffset = obj["startOffset"]?.jsonPrimitive?.int
+                    InjectionPoint(
+                        ownerClassFqn = ownerClassFqn,
+                        kind = kind,
+                        targetTypeFqn = targetTypeFqn,
+                        name = name,
+                        methodId = methodId,
+                        paramIndex = paramIndex,
+                        filePath = filePath,
+                        startOffset = startOffset,
+                    )
+                }
+
+        val statsObj = root["stats"]?.jsonObject
+        val stats =
+            if (statsObj != null) {
+                FrameworkModelStats(
+                    beans = statsObj["beans"]?.jsonPrimitive?.int ?: beans.size,
+                    injections = statsObj["injections"]?.jsonPrimitive?.int ?: injections.size,
+                    classesWithBeans = statsObj["classesWithBeans"]?.jsonPrimitive?.int ?: 0,
+                    classesWithInjections = statsObj["classesWithInjections"]?.jsonPrimitive?.int ?: 0,
+                )
+            } else {
+                FrameworkModelStats(
+                    beans = beans.size,
+                    injections = injections.size,
+                    classesWithBeans = 0,
+                    classesWithInjections = 0,
+                )
+            }
+
+        return FrameworkModelIndex(beans = beans, injections = injections, stats = stats)
+    }
+
+    private fun cacheFile(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/callgraph.json")
+    }
+
+    private fun typeHierarchyCacheFile(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/typehierarchy.json")
+    }
+
+    private fun methodSummaryCacheFile(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/methodsummaries.json")
+    }
+
+    private fun methodSummaryShardsDir(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/methodsummaries")
+    }
+
+    private fun frameworkModelCacheFile(): File? {
+        val basePath = project.basePath ?: return null
+        return File(basePath, ".idea/secrux/framework-model.json")
+    }
+
+    private data class MethodSummaryShard(
+        val key: String,
+        val file: String,
+        val methodCount: Int,
+        val methods: List<Pair<MethodRef, MethodSummary>>,
+    )
+
+    private fun shardMethodSummaries(index: MethodSummaryIndex, maxShards: Int = 200): List<MethodSummaryShard> {
+        if (index.summaries.isEmpty()) return emptyList()
+        val shards = linkedMapOf<String, MutableList<Pair<MethodRef, MethodSummary>>>()
+        for ((ref, summary) in index.summaries) {
+            val key = shardKeyForMethod(ref)
+            shards.getOrPut(key) { mutableListOf() }.add(ref to summary)
+        }
+
+        val ordered: List<Pair<String, List<Pair<MethodRef, MethodSummary>>>> =
+            shards.entries
+                .sortedWith(compareByDescending<Map.Entry<String, MutableList<Pair<MethodRef, MethodSummary>>>> { it.value.size }.thenBy { it.key })
+                .map { it.key to it.value.toList() }
+                .toList()
+
+        val safeMaxShards = maxShards.coerceIn(1, 500)
+        val capped =
+            if (ordered.size <= safeMaxShards) {
+                ordered
+            } else {
+                val top = ordered.take(safeMaxShards - 1)
+                val rest = ordered.drop(safeMaxShards - 1)
+                val merged = rest.flatMap { it.second }
+                top + listOf("_OTHER" to merged)
+            }
+
+        val dirPrefix = "methodsummaries"
+        return capped.map { (key, list) ->
+            val fileName = "methodsummaries_${sanitizeShardKey(key)}.json"
+            MethodSummaryShard(
+                key = key,
+                file = "$dirPrefix/$fileName",
+                methodCount = list.size,
+                methods = list,
+            )
+        }
+    }
+
+    private fun shardKeyForMethod(ref: MethodRef, packageSegments: Int = 2): String {
+        val parts = ref.classFqn.split('.')
+        if (parts.size <= 1) return "_DEFAULT"
+        val pkg = parts.dropLast(1)
+        val head = pkg.take(packageSegments.coerceIn(1, 6))
+        return head.joinToString(".").ifBlank { "_DEFAULT" }
+    }
+
+    private fun sanitizeShardKey(key: String): String {
+        val trimmed = key.trim().ifBlank { "_DEFAULT" }
+        return trimmed.map { ch ->
+            when {
+                ch.isLetterOrDigit() -> ch
+                ch == '_' || ch == '-' -> ch
+                else -> '_'
+            }
+        }.joinToString("")
+    }
+
+    private fun readMethodSummaryEntries(
+        methodsArray: List<kotlinx.serialization.json.JsonElement>,
+        out: MutableMap<MethodRef, MethodSummary>,
+    ) {
         for (entry in methodsArray) {
             val obj = entry.jsonObject
             val id = obj["id"]?.jsonPrimitive?.content ?: continue
@@ -712,6 +1028,20 @@ class CallGraphService(
                 obj["writes"]?.jsonArray.orEmpty()
                     .mapNotNull { it.jsonPrimitive.content }
                     .toSet()
+
+            val aliases =
+                obj["aliases"]?.jsonArray.orEmpty()
+                    .mapNotNull { aliasElem ->
+                        val aliasObj = aliasElem.jsonObject
+                        val left = aliasObj["left"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                        val right = aliasObj["right"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                        val offset = aliasObj["offset"]?.jsonPrimitive?.int
+                        AliasEdge(
+                            left = left,
+                            right = right,
+                            offset = offset,
+                        )
+                    }
 
             val stores =
                 obj["stores"]?.jsonArray.orEmpty()
@@ -757,143 +1087,16 @@ class CallGraphService(
                         )
                     }
 
-            summaries[ref] =
+            out[ref] =
                 MethodSummary(
                     fieldsRead = reads,
                     fieldsWritten = writes,
+                    aliases = aliases,
                     stores = stores,
                     loads = loads,
                     calls = calls,
                 )
         }
-
-        val statsObj = root["stats"]?.jsonObject
-        val stats =
-            if (statsObj != null) {
-                val methodsWithFieldAccess =
-                    summaries.values.count { it.fieldsRead.isNotEmpty() || it.fieldsWritten.isNotEmpty() || it.stores.isNotEmpty() || it.loads.isNotEmpty() }
-                val distinctFields =
-                    summaries.values
-                        .flatMap { it.fieldsRead + it.fieldsWritten + it.stores.map { s -> s.targetField } + it.loads.map { l -> l.sourceField } }
-                        .toSet()
-                MethodSummaryStats(
-                    methodsIndexed = statsObj["methodsIndexed"]?.jsonPrimitive?.int ?: 0,
-                    methodsWithFieldAccess = statsObj["methodsWithFieldAccess"]?.jsonPrimitive?.int ?: methodsWithFieldAccess,
-                    fieldReads = statsObj["fieldReads"]?.jsonPrimitive?.int ?: summaries.values.sumOf { it.fieldsRead.size },
-                    fieldWrites = statsObj["fieldWrites"]?.jsonPrimitive?.int ?: summaries.values.sumOf { it.fieldsWritten.size },
-                    distinctFields = statsObj["distinctFields"]?.jsonPrimitive?.int ?: distinctFields.size,
-                )
-            } else {
-                val distinctFields =
-                    summaries.values
-                        .asSequence()
-                        .flatMap { s ->
-                            sequenceOf(
-                                s.fieldsRead.asSequence(),
-                                s.fieldsWritten.asSequence(),
-                                s.stores.asSequence().map { it.targetField },
-                                s.loads.asSequence().map { it.sourceField },
-                            ).flatten()
-                        }
-                        .toSet()
-                MethodSummaryStats(
-                    methodsIndexed = summaries.size,
-                    methodsWithFieldAccess = summaries.values.count { it.fieldsRead.isNotEmpty() || it.fieldsWritten.isNotEmpty() || it.stores.isNotEmpty() || it.loads.isNotEmpty() },
-                    fieldReads = summaries.values.sumOf { it.fieldsRead.size },
-                    fieldWrites = summaries.values.sumOf { it.fieldsWritten.size },
-                    distinctFields = distinctFields.size,
-                )
-            }
-
-        return MethodSummaryIndex(summaries = summaries, stats = stats)
-    }
-
-    private fun loadFrameworkModel(): FrameworkModelIndex? {
-        val file = frameworkModelCacheFile() ?: return null
-        if (!file.exists()) return null
-
-        val body = file.readText(Charsets.UTF_8)
-        val root = json.parseToJsonElement(body).jsonObject
-
-        val beans =
-            root["beans"]?.jsonArray.orEmpty()
-                .mapNotNull { elem ->
-                    val obj = elem.jsonObject
-                    val typeFqn = obj["typeFqn"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kindStr = obj["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kind = runCatching { BeanKind.valueOf(kindStr) }.getOrNull() ?: return@mapNotNull null
-                    val source = obj["source"]?.jsonPrimitive?.contentOrNull
-                    val filePath = obj["filePath"]?.jsonPrimitive?.contentOrNull
-                    val startOffset = obj["startOffset"]?.jsonPrimitive?.int
-                    BeanDefinition(
-                        typeFqn = typeFqn,
-                        kind = kind,
-                        source = source,
-                        filePath = filePath,
-                        startOffset = startOffset,
-                    )
-                }
-
-        val injections =
-            root["injections"]?.jsonArray.orEmpty()
-                .mapNotNull { elem ->
-                    val obj = elem.jsonObject
-                    val ownerClassFqn = obj["ownerClassFqn"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kindStr = obj["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val kind = runCatching { InjectionKind.valueOf(kindStr) }.getOrNull() ?: return@mapNotNull null
-                    val targetTypeFqn = obj["targetTypeFqn"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val name = obj["name"]?.jsonPrimitive?.contentOrNull
-                    val filePath = obj["filePath"]?.jsonPrimitive?.contentOrNull
-                    val startOffset = obj["startOffset"]?.jsonPrimitive?.int
-                    InjectionPoint(
-                        ownerClassFqn = ownerClassFqn,
-                        kind = kind,
-                        targetTypeFqn = targetTypeFqn,
-                        name = name,
-                        filePath = filePath,
-                        startOffset = startOffset,
-                    )
-                }
-
-        val statsObj = root["stats"]?.jsonObject
-        val stats =
-            if (statsObj != null) {
-                FrameworkModelStats(
-                    beans = statsObj["beans"]?.jsonPrimitive?.int ?: beans.size,
-                    injections = statsObj["injections"]?.jsonPrimitive?.int ?: injections.size,
-                    classesWithBeans = statsObj["classesWithBeans"]?.jsonPrimitive?.int ?: 0,
-                    classesWithInjections = statsObj["classesWithInjections"]?.jsonPrimitive?.int ?: 0,
-                )
-            } else {
-                FrameworkModelStats(
-                    beans = beans.size,
-                    injections = injections.size,
-                    classesWithBeans = 0,
-                    classesWithInjections = 0,
-                )
-            }
-
-        return FrameworkModelIndex(beans = beans, injections = injections, stats = stats)
-    }
-
-    private fun cacheFile(): File? {
-        val basePath = project.basePath ?: return null
-        return File(basePath, ".idea/secrux/callgraph.json")
-    }
-
-    private fun typeHierarchyCacheFile(): File? {
-        val basePath = project.basePath ?: return null
-        return File(basePath, ".idea/secrux/typehierarchy.json")
-    }
-
-    private fun methodSummaryCacheFile(): File? {
-        val basePath = project.basePath ?: return null
-        return File(basePath, ".idea/secrux/methodsummaries.json")
-    }
-
-    private fun frameworkModelCacheFile(): File? {
-        val basePath = project.basePath ?: return null
-        return File(basePath, ".idea/secrux/framework-model.json")
     }
 
     private fun toProjectRelativePath(absolutePath: String): String {
@@ -901,33 +1104,56 @@ class CallGraphService(
         return absolutePath.removePrefix(basePath).removePrefix("/")
     }
 
-    private fun buildGraphInternal(indicator: ProgressIndicator): BuildResult {
+    private fun parseExcludedPathRegex(): Regex? {
         val settings = SecruxProjectSettings.getInstance(project).state
-        val excludedPathRegex =
-            settings.excludedPathRegex.trim().takeIf { it.isNotEmpty() }?.let { pattern ->
-                runCatching { Regex(pattern) }
-                    .onFailure { e -> log.warn("Invalid excludedPathRegex: $pattern", e) }
-                    .getOrNull()
-            }
+        val pattern = settings.excludedPathRegex.trim().takeIf { it.isNotEmpty() } ?: return null
+        return runCatching { Regex(pattern) }
+            .onFailure { e -> log.warn("Invalid excludedPathRegex: $pattern", e) }
+            .getOrNull()
+    }
+
+    private fun collectSourceFiles(
+        scope: GlobalSearchScope,
+        fileIndex: ProjectFileIndex,
+        excludedPathRegex: Regex?,
+    ): List<VirtualFile> =
+        ReadAction.compute<List<VirtualFile>, RuntimeException> {
+            val javaFiles = FilenameIndex.getAllFilesByExt(project, "java", scope)
+            val kotlinFiles = FilenameIndex.getAllFilesByExt(project, "kt", scope)
+
+            (javaFiles + kotlinFiles)
+                .distinct()
+                .filter { file ->
+                    if (!fileIndex.isInSourceContent(file)) return@filter false
+                    if (excludedPathRegex == null) return@filter true
+                    val rel = relativePath(file.path)
+                    !excludedPathRegex.containsMatchIn(rel)
+                }
+        }
+
+    private fun computeProjectFingerprint(sourceFiles: List<VirtualFile>): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        val inputs =
+            sourceFiles
+                .asSequence()
+                .map { "${toProjectRelativePath(it.path)}:${it.timeStamp}" }
+                .sorted()
+        for (line in inputs) {
+            md.update(line.toByteArray(Charsets.UTF_8))
+            md.update(0)
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }.take(16)
+    }
+
+    private fun buildGraphInternal(indicator: ProgressIndicator): BuildResult {
+        val excludedPathRegex = parseExcludedPathRegex()
 
         val scope = GlobalSearchScope.projectScope(project)
         val psiManager = PsiManager.getInstance(project)
         val fileIndex = ProjectFileIndex.getInstance(project)
 
-        val sourceFiles =
-            ReadAction.compute<List<VirtualFile>, RuntimeException> {
-                val javaFiles = FilenameIndex.getAllFilesByExt(project, "java", scope)
-                val kotlinFiles = FilenameIndex.getAllFilesByExt(project, "kt", scope)
-
-                (javaFiles + kotlinFiles)
-                    .distinct()
-                    .filter { file ->
-                        if (!fileIndex.isInSourceContent(file)) return@filter false
-                        if (excludedPathRegex == null) return@filter true
-                        val rel = relativePath(file.path)
-                        !excludedPathRegex.containsMatchIn(rel)
-                    }
-            }
+        val sourceFiles = collectSourceFiles(scope = scope, fileIndex = fileIndex, excludedPathRegex = excludedPathRegex)
+        val projectFingerprint = computeProjectFingerprint(sourceFiles)
 
         val methods = linkedMapOf<MethodRef, MethodLocation>()
         val outgoing = linkedMapOf<MethodRef, MutableSet<MethodRef>>()
@@ -942,6 +1168,7 @@ class CallGraphService(
         val rawFieldStoresByMethod = linkedMapOf<MethodRef, MutableList<RawFieldStore>>()
         val rawFieldLoadsByMethod = linkedMapOf<MethodRef, MutableList<RawFieldLoad>>()
         val rawCallSitesByMethod = linkedMapOf<MethodRef, MutableList<RawCallSite>>()
+        val rawAliasEdgesByMethod = linkedMapOf<MethodRef, MutableList<RawAliasEdge>>()
         val beans = linkedSetOf<BeanDefinition>()
         val injections = mutableListOf<InjectionPoint>()
         val classesWithBeans = linkedSetOf<String>()
@@ -1041,7 +1268,8 @@ class CallGraphService(
 
                             for (ctor in clazz.constructors) {
                                 if (!ctor.hasAnyAnnotation(SPRING_INJECTION_ANNOTATIONS)) continue
-                                for (param in ctor.parameterList.parameters) {
+                                val ctorId = ctor.toMethodRefOrNull()?.id
+                                for ((idx, param) in ctor.parameterList.parameters.withIndex()) {
                                     val targetTypeFqn = normalizeType(param.type) ?: continue
                                     classesWithInjections.add(child)
                                     injections.add(
@@ -1050,6 +1278,8 @@ class CallGraphService(
                                             kind = InjectionKind.CONSTRUCTOR_PARAM,
                                             targetTypeFqn = targetTypeFqn,
                                             name = param.name,
+                                            methodId = ctorId,
+                                            paramIndex = idx,
                                             filePath = relPath,
                                             startOffset = param.textRange?.startOffset,
                                         )
@@ -1060,7 +1290,8 @@ class CallGraphService(
                             for (method in clazz.methods) {
                                 if (method.isConstructor) continue
                                 if (!method.hasAnyAnnotation(SPRING_INJECTION_ANNOTATIONS)) continue
-                                for (param in method.parameterList.parameters) {
+                                val methodId = method.toMethodRefOrNull()?.id
+                                for ((idx, param) in method.parameterList.parameters.withIndex()) {
                                     val targetTypeFqn = normalizeType(param.type) ?: continue
                                     classesWithInjections.add(child)
                                     injections.add(
@@ -1069,6 +1300,8 @@ class CallGraphService(
                                             kind = InjectionKind.METHOD_PARAM,
                                             targetTypeFqn = targetTypeFqn,
                                             name = param.name,
+                                            methodId = methodId,
+                                            paramIndex = idx,
                                             filePath = relPath,
                                             startOffset = param.textRange?.startOffset,
                                         )
@@ -1214,13 +1447,13 @@ class CallGraphService(
                             aliasByMethod.getOrPut(methodRef) { UnionFind() }.union(left, right)
                         }
 
-                        private fun receiverTokenForQualified(enclosingMethod: UMethod, node: UQualifiedReferenceExpression): String? {
+                        private fun receiverTokenForQualified(
+                            enclosingMethod: UMethod,
+                            methodRef: MethodRef,
+                            node: UQualifiedReferenceExpression,
+                        ): String? {
                             val receiver = node.receiver ?: return null
-                            return when (receiver) {
-                                is UThisExpression -> THIS_RECEIVER_TOKEN
-                                is USimpleNameReferenceExpression -> resolveVariableToken(enclosingMethod, receiver) ?: OTHER_RECEIVER_TOKEN
-                                else -> OTHER_RECEIVER_TOKEN
-                            }
+                            return valueTokenForExpression(enclosingMethod, methodRef, receiver) ?: OTHER_RECEIVER_TOKEN
                         }
 
                         private fun computeThisOrStaticFieldKey(
@@ -1245,7 +1478,8 @@ class CallGraphService(
                                 uf != null && uf.connected(receiverToken, THIS_RECEIVER_TOKEN) ->
                                     fieldKey(base = "THIS", ownerFqn = ownerFqn, fieldName = fieldName)
 
-                                else -> null
+                                receiverToken.isNullOrBlank() -> null
+                                else -> heapFieldKey(baseToken = receiverToken, ownerFqn = ownerFqn, fieldName = fieldName)
                             }
                         }
 
@@ -1256,7 +1490,10 @@ class CallGraphService(
                         ): String? {
                             val element = expr ?: return null
                             return when (element) {
+                                is UParenthesizedExpression ->
+                                    valueTokenForExpression(enclosingMethod, methodRef, element.expression)
                                 is UThisExpression -> THIS_RECEIVER_TOKEN
+                                is UCallExpression -> callResultTokenForCallExpression(element)
                                 is USimpleNameReferenceExpression -> {
                                     val resolved = element.resolve()
                                     when (resolved) {
@@ -1284,7 +1521,7 @@ class CallGraphService(
                                         if (resolved.hasModifierProperty(PsiModifier.STATIC)) {
                                             null
                                         } else {
-                                            receiverTokenForQualified(enclosingMethod, element)
+                                            receiverTokenForQualified(enclosingMethod, methodRef, element)
                                         }
                                     computeThisOrStaticFieldKey(
                                         methodRef = methodRef,
@@ -1297,6 +1534,11 @@ class CallGraphService(
 
                                 else -> null
                             }
+                        }
+
+                        private fun callResultTokenForCallExpression(node: UCallExpression): String? {
+                            val offset = node.sourcePsi?.textRange?.startOffset ?: return null
+                            return "$CALL_RESULT_TOKEN_PREFIX$offset"
                         }
 
                         private fun resolveCallResultToken(
@@ -1397,14 +1639,18 @@ class CallGraphService(
                             val methodRef = enclosing.javaPsi.toMethodRefOrNull() ?: return false
 
                             val leftVar = resolveVariableToken(enclosing, node.leftOperand)
-                            val rightVar =
-                                when (val rhs = node.rightOperand) {
-                                    is UThisExpression -> THIS_RECEIVER_TOKEN
-                                    is USimpleNameReferenceExpression -> resolveVariableToken(enclosing, rhs)
-                                    else -> null
+                            val rightToken = valueTokenForExpression(enclosing, methodRef, node.rightOperand)
+                            if (leftVar != null && rightToken != null) {
+                                recordLocalAlias(methodRef, left = leftVar, right = rightToken)
+                                if (leftVar != rightToken) {
+                                    rawAliasEdgesByMethod.getOrPut(methodRef) { mutableListOf() }.add(
+                                        RawAliasEdge(
+                                            leftToken = leftVar,
+                                            rightToken = rightToken,
+                                            offset = node.sourcePsi?.textRange?.startOffset,
+                                        )
+                                    )
                                 }
-                            if (leftVar != null && rightVar != null) {
-                                recordLocalAlias(methodRef, left = leftVar, right = rightVar)
                             }
 
                             val assignOffset = node.sourcePsi?.textRange?.startOffset
@@ -1416,7 +1662,7 @@ class CallGraphService(
                                         null
                                     } else {
                                         when (val lhs = node.leftOperand) {
-                                            is UQualifiedReferenceExpression -> receiverTokenForQualified(enclosing, lhs)
+                                            is UQualifiedReferenceExpression -> receiverTokenForQualified(enclosing, methodRef, lhs)
                                             is USimpleNameReferenceExpression -> null
                                             else -> OTHER_RECEIVER_TOKEN
                                         }
@@ -1445,7 +1691,7 @@ class CallGraphService(
                                         null
                                     } else {
                                         when (val rhs = node.rightOperand) {
-                                            is UQualifiedReferenceExpression -> receiverTokenForQualified(enclosing, rhs)
+                                            is UQualifiedReferenceExpression -> receiverTokenForQualified(enclosing, methodRef, rhs)
                                             is USimpleNameReferenceExpression -> null
                                             else -> OTHER_RECEIVER_TOKEN
                                         }
@@ -1480,7 +1726,7 @@ class CallGraphService(
                                     null
                                 } else {
                                     when (returned) {
-                                        is UQualifiedReferenceExpression -> receiverTokenForQualified(enclosing, returned)
+                                        is UQualifiedReferenceExpression -> receiverTokenForQualified(enclosing, methodRef, returned)
                                         is USimpleNameReferenceExpression -> null
                                         else -> OTHER_RECEIVER_TOKEN
                                     }
@@ -1511,7 +1757,8 @@ class CallGraphService(
                                 if (field.hasModifierProperty(PsiModifier.STATIC)) {
                                     null
                                 } else {
-                                    receiverTokenForQualified(enclosing, node)
+                                    val ref = enclosing.javaPsi.toMethodRefOrNull() ?: return false
+                                    receiverTokenForQualified(enclosing, ref, node)
                                 }
                             recordFieldAccess(node, field, receiverToken = receiverToken, isWrite = false)
                             return false
@@ -1588,17 +1835,27 @@ class CallGraphService(
                         fieldName = fieldName,
                     )
 
-                else -> null
+                else -> {
+                    val base =
+                        when (receiverToken) {
+                            THIS_RECEIVER_TOKEN -> "THIS"
+                            RETURN_VALUE_TOKEN -> "RET"
+                            OTHER_RECEIVER_TOKEN -> "UNKNOWN"
+                            else -> receiverToken
+                        }
+                    if (base.isBlank() || base == "UNKNOWN") return null
+                    heapFieldKey(baseToken = base, ownerFqn = ownerFqn, fieldName = fieldName)
+                }
             }
         }
 
-        fun externalizeValueToken(uf: UnionFind?, token: String?): String? {
+        fun externalizeValueToken(uf: UnionFind?, token: String?, collapseThisAliases: Boolean = true): String? {
             if (token == null) return null
             return when {
                 token == THIS_RECEIVER_TOKEN -> "THIS"
                 token == RETURN_VALUE_TOKEN -> "RET"
                 token == OTHER_RECEIVER_TOKEN -> "UNKNOWN"
-                uf != null && (token.startsWith("LOCAL:") || token.startsWith("PARAM:")) && uf.connected(token, THIS_RECEIVER_TOKEN) -> "THIS"
+                collapseThisAliases && uf != null && (token.startsWith("LOCAL:") || token.startsWith("PARAM:")) && uf.connected(token, THIS_RECEIVER_TOKEN) -> "THIS"
                 else -> token
             }
         }
@@ -1609,6 +1866,7 @@ class CallGraphService(
                 addAll(rawFieldStoresByMethod.keys)
                 addAll(rawFieldLoadsByMethod.keys)
                 addAll(rawCallSitesByMethod.keys)
+                addAll(rawAliasEdgesByMethod.keys)
             }
 
         for (methodRef in methodsToSummarize) {
@@ -1673,6 +1931,20 @@ class CallGraphService(
                         )
                     }
 
+            val aliases =
+                rawAliasEdgesByMethod[methodRef].orEmpty()
+                    .mapNotNull { raw ->
+                        val left = externalizeValueToken(uf, raw.leftToken, collapseThisAliases = false) ?: return@mapNotNull null
+                        val right = externalizeValueToken(uf, raw.rightToken, collapseThisAliases = false) ?: return@mapNotNull null
+                        if (left == "UNKNOWN" || right == "UNKNOWN") return@mapNotNull null
+                        if (left == right) return@mapNotNull null
+                        AliasEdge(
+                            left = left,
+                            right = right,
+                            offset = raw.offset,
+                        )
+                    }
+
             val calls =
                 rawCallSitesByMethod[methodRef].orEmpty()
                     .map { raw ->
@@ -1685,8 +1957,8 @@ class CallGraphService(
                         )
                     }
 
-            if (reads.isEmpty() && writes.isEmpty() && stores.isEmpty() && loads.isEmpty() && calls.isEmpty()) continue
-            if (reads.isNotEmpty() || writes.isNotEmpty()) methodsWithFieldAccess++
+            if (reads.isEmpty() && writes.isEmpty() && aliases.isEmpty() && stores.isEmpty() && loads.isEmpty() && calls.isEmpty()) continue
+            if (reads.isNotEmpty() || writes.isNotEmpty() || stores.isNotEmpty() || loads.isNotEmpty()) methodsWithFieldAccess++
 
             distinctFields.addAll(reads)
             distinctFields.addAll(writes)
@@ -1694,6 +1966,7 @@ class CallGraphService(
                 MethodSummary(
                     fieldsRead = reads,
                     fieldsWritten = writes,
+                    aliases = aliases,
                     stores = stores,
                     loads = loads,
                     calls = calls,
@@ -1740,6 +2013,7 @@ class CallGraphService(
             typeHierarchy = typeHierarchy,
             methodSummaries = methodSummaries,
             frameworkModel = frameworkModel,
+            projectFingerprint = projectFingerprint,
         )
     }
 
@@ -2141,6 +2415,7 @@ class CallGraphService(
         private const val THIS_RECEIVER_TOKEN = "__secrux_receiver_this__"
         private const val OTHER_RECEIVER_TOKEN = "__secrux_receiver_other__"
         private const val RETURN_VALUE_TOKEN = "__secrux_return__"
+        private const val CALL_RESULT_TOKEN_PREFIX = "CALLRET@"
 
         fun getInstance(project: Project): CallGraphService = project.service()
     }

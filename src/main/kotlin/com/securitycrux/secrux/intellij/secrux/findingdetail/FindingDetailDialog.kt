@@ -4,7 +4,6 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
-import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
@@ -17,6 +16,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.panels.VerticalLayout
 import com.intellij.util.ui.JBUI
+import com.securitycrux.secrux.intellij.callgraph.CallEdge
 import com.securitycrux.secrux.intellij.callgraph.CallGraphService
 import com.securitycrux.secrux.intellij.callgraph.MethodRef
 import com.securitycrux.secrux.intellij.i18n.SecruxBundle
@@ -41,7 +41,7 @@ class FindingDetailDialog(
         text: String,
         project: Project,
         fileType: FileType,
-    ) : EditorTextField(EditorFactory.getInstance().createDocument(text), project, fileType) {
+    ) : EditorTextField(text, project, fileType) {
         override fun createEditor(): EditorEx {
             val editor = super.createEditor()
             editor.setEmbeddedIntoDialogWrapper(true)
@@ -146,7 +146,7 @@ class FindingDetailDialog(
         val openButton =
             JButton(SecruxBundle.message("dialog.callChains.open")).apply {
                 isFocusable = false
-                addActionListener { openStepLocation(step.raw) }
+                addActionListener { openStepLocation(step.raw, nextStep) }
             }
 
         val header =
@@ -245,6 +245,7 @@ class FindingDetailDialog(
         sb.append("method: ").append(methodRef.id).append('\n')
         sb.append("reads=").append(summary.fieldsRead.size)
             .append(" writes=").append(summary.fieldsWritten.size)
+            .append(" aliases=").append(summary.aliases.size)
             .append(" stores=").append(summary.stores.size)
             .append(" loads=").append(summary.loads.size)
             .append(" calls=").append(summary.calls.size)
@@ -254,6 +255,10 @@ class FindingDetailDialog(
         val writes = summary.fieldsWritten.toList().sorted()
         appendList(sb, "reads", reads, limit = 30) { it }
         appendList(sb, "writes", writes, limit = 30) { it }
+        appendList(sb, "aliases", summary.aliases, limit = 30) { a ->
+            val loc = a.offset?.let { " @${it}" }.orEmpty()
+            "${a.left} <-> ${a.right}$loc"
+        }
 
         appendList(sb, "stores", summary.stores) { s ->
             val loc = s.offset?.let { " @${it}" }.orEmpty()
@@ -293,7 +298,18 @@ class FindingDetailDialog(
         return sb.toString().trimEnd()
     }
 
-    private fun openStepLocation(step: CallChainStepModel) {
+    private fun openStepLocation(step: CallChainStepModel, nextStep: CallChainStepModel?) {
+        val graph = CallGraphService.getInstance(project).getLastGraph()
+        val stepRef = extractMethodRef(step)
+        val nextRef = nextStep?.let { extractMethodRef(it) }
+        if (graph != null && stepRef != null && nextRef != null) {
+            val callSite = graph.callSites[CallEdge(caller = stepRef, callee = nextRef)]
+            if (callSite != null) {
+                OpenFileDescriptor(project, callSite.file, callSite.startOffset).navigate(true)
+                return
+            }
+        }
+
         val path = step.file?.trim().takeIf { !it.isNullOrBlank() } ?: return
         val base = project.basePath ?: return
         val vf = LocalFileSystem.getInstance().findFileByPath("$base/$path")
@@ -467,7 +483,7 @@ class FindingDetailDialog(
         code: String,
         filePath: String?,
     ): JComponent {
-        val editor = CodeViewerField(code, project, codeViewerFileType)
+        val editor = CodeViewerField(code, project, fileTypeForPath(filePath))
         val wrapper =
             JPanel(BorderLayout()).apply {
                 border = JBUI.Borders.compound(TitledBorder(title), JBUI.Borders.empty(6))
@@ -503,7 +519,17 @@ class FindingDetailDialog(
     }
 
     private fun fileTypeForPath(path: String?): FileType {
-        return codeViewerFileType
+        val raw = path?.trim().takeIf { !it.isNullOrBlank() } ?: return codeViewerFileType
+        val fileName =
+            raw
+                .trimEnd('/')
+                .substringAfterLast('/')
+                .takeIf { it.isNotBlank() }
+                ?: return codeViewerFileType
+
+        val fileType = FileTypeManager.getInstance().getFileTypeByFileName(fileName)
+        if (fileType.isBinary) return codeViewerFileType
+        return fileType
     }
 
     private data class DisplayStep(
