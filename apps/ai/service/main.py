@@ -285,20 +285,62 @@ def _ensure_within_directory(base_dir: Path, target: Path) -> None:
 
 def _extract_archive(archive_path: Path, target_dir: Path) -> None:
     if zipfile.is_zipfile(archive_path):
-        with zipfile.ZipFile(archive_path) as zf:
-            for member in zf.namelist():
-                extracted = target_dir / member
-                _ensure_within_directory(target_dir, extracted)
-            zf.extractall(target_dir)
+        _extract_zip_safe(archive_path, target_dir)
     elif tarfile.is_tarfile(archive_path):
-        with tarfile.open(archive_path) as tf:
-            for member in tf.getmembers():
-                extracted = target_dir / (member.name or "")
-                _ensure_within_directory(target_dir, extracted)
-            tf.extractall(target_dir)
+        _extract_tar_safe(archive_path, target_dir)
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported archive format")
     archive_path.unlink(missing_ok=True)
+
+
+def _extract_zip_safe(archive_path: Path, target_dir: Path) -> None:
+    """Extract zip archive safely, one file at a time with validation."""
+    with zipfile.ZipFile(archive_path) as zf:
+        for member in zf.infolist():
+            # Skip empty names
+            if not member.filename:
+                continue
+            # Skip directory entries (they are created automatically)
+            if member.is_dir():
+                continue
+            # Validate path before extraction
+            extracted = target_dir / member.filename
+            _ensure_within_directory(target_dir, extracted)
+            # Extract single file
+            zf.extract(member, target_dir)
+
+
+def _extract_tar_safe(archive_path: Path, target_dir: Path) -> None:
+    """Extract tar archive safely, rejecting dangerous member types."""
+    with tarfile.open(archive_path) as tf:
+        for member in tf.getmembers():
+            # Reject dangerous member types
+            if member.issym() or member.islnk():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Archive contains symbolic/hard link: {member.name}",
+                )
+            if member.isdev() or member.isblk() or member.ischr() or member.isfifo():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Archive contains device/fifo: {member.name}",
+                )
+            # Reject absolute paths
+            if member.name.startswith("/") or member.name.startswith("\\"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Archive contains absolute path: {member.name}",
+                )
+            # Skip empty names and directory entries
+            if not member.name or member.isdir():
+                continue
+            # Validate path before extraction
+            extracted = target_dir / member.name
+            _ensure_within_directory(target_dir, extracted)
+            # Sanitize mode: remove setuid/setgid/sticky, limit to 0755 max
+            member.mode = member.mode & 0o755
+            # Extract single file
+            tf.extract(member, target_dir, set_attrs=False)
 
 
 def _ensure_builtin_mcps(tenant_id: UUID, session: Session) -> None:
