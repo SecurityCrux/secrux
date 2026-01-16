@@ -26,8 +26,8 @@
      "token": "EXECUTOR_TOKEN",
      "insecure": false,
      "engineImages": {
-       "semgrep": "ghcr.io/secrux/semgrep:latest",
-       "trivy": "ghcr.io/secrux/trivy:latest"
+       "semgrep": "ghcr.io/securitycrux/secrux-semgrep-engine:latest",
+       "trivy": "ghcr.io/securitycrux/secrux-trivy-engine:latest"
      },
      "trivy": {
        "sanitizePomRepositories": true,

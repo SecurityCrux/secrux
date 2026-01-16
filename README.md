@@ -27,8 +27,8 @@ This is a **Go binary** (not a Docker container). The host running the agent mus
 	     "token": "EXECUTOR_TOKEN",
 	     "insecure": false,
 	     "engineImages": {
-	       "semgrep": "ghcr.io/secrux/semgrep:latest",
-	       "trivy": "ghcr.io/secrux/trivy:latest",
+	       "semgrep": "ghcr.io/securitycrux/secrux-semgrep-engine:latest",
+	       "trivy": "ghcr.io/securitycrux/secrux-trivy-engine:latest",
 	       "grype": "ghcr.io/secrux/grype:1.0.2",
 	       "dependency-check": "registry.local/dc:2024.10"
 	     },
