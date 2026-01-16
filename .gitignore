@@ -25,4 +25,9 @@ deploy/production/control-plane/certs/
 **/*.egg-info/
 
 # Secrux runtime artifacts
-secrux-ai/storage/
+secrux-ai/
+secrux-web/
+secrux-engine/
+secrux-executor/
+secrux-intellij-plugin/
+secrux-server/
