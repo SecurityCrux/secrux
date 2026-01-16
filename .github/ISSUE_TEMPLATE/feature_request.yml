@@ -1,0 +1,65 @@
+name: Feature Request / 功能建议
+description: Suggest a new feature or improvement / 提出新功能或改进建议
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your suggestion! Please describe your idea.
+        感谢你的建议！请描述你的想法。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / 问题背景
+      description: |
+        Is your feature request related to a problem?
+        这个功能请求是否与某个问题相关？
+      placeholder: |
+        I'm always frustrated when... / 我总是对...感到困扰
+    validations:
+      required: false
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution / 建议方案
+      description: |
+        Describe the solution you'd like.
+        描述你期望的解决方案。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered / 备选方案
+      description: |
+        Any alternative solutions you've considered?
+        你考虑过的其他方案？
+    validations:
+      required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority / 优先级
+      description: How important is this feature to you? / 这个功能对你有多重要？
+      options:
+        - Low / 低
+        - Medium / 中
+        - High / 高
+        - Critical / 关键
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context / 补充信息
+      description: |
+        Any other context, mockups, or screenshots.
+        其他相关信息、原型图或截图。
+    validations:
+      required: false

@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question / 问题咨询
+    url: https://github.com/SecurityCrux/secrux/discussions
+    about: |
+      Ask questions in Discussions instead of opening an issue.
+      请在 Discussions 中提问，而非创建 Issue。
