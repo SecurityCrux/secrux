@@ -8,12 +8,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { env } from "@/lib/env"
 import { formatDateTime } from "@/lib/utils"
 import { createIntellijToken, listIntellijTokens, revokeIntellijToken } from "@/services/ide-plugin-service"
 import type { IntellijTokenCreatedResponse } from "@/types/api"
 
-type CopiedField = "baseUrl" | "token"
+type CopiedField = "token"
 
 export function IntellijPluginPage() {
   const { t } = useTranslation()
@@ -22,17 +21,6 @@ export function IntellijPluginPage() {
   const [revokingId, setRevokingId] = useState<string | null>(null)
   const [copied, setCopied] = useState<CopiedField | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  const resolvedApiBaseUrl =
-    typeof window !== "undefined"
-      ? (() => {
-          try {
-            return new URL(env.apiBaseUrl, window.location.origin).toString()
-          } catch {
-            return env.apiBaseUrl
-          }
-        })()
-      : env.apiBaseUrl
 
   const tokensQuery = useQuery({
     queryKey: ["idePlugins", "intellij", "tokens"],
@@ -96,28 +84,6 @@ export function IntellijPluginPage() {
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("idePlugins.intellij.connection.title")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-2">
-            <Label htmlFor="ide-plugin-base-url">{t("idePlugins.intellij.connection.baseUrl")}</Label>
-            <div className="flex gap-2">
-              <Input id="ide-plugin-base-url" readOnly value={resolvedApiBaseUrl} className="font-mono text-xs" />
-              <Button type="button" variant="outline" onClick={() => void copyText(resolvedApiBaseUrl, "baseUrl")}>
-                {copied === "baseUrl" ? t("common.copied") : t("common.copy")}
-              </Button>
-            </div>
-          </div>
-
-          <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            <p>{t("idePlugins.intellij.connection.headerHint")}</p>
-            <p className="mt-1 font-mono">Authorization: Bearer {"<token>"}</p>
-          </div>
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader>
@@ -218,20 +184,6 @@ export function IntellijPluginPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("idePlugins.intellij.apis.title")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <p className="font-mono">POST /ideplugins/intellij/tokens</p>
-          <p className="font-mono">GET /ideplugins/intellij/tokens</p>
-          <p className="font-mono">DELETE /ideplugins/intellij/tokens/{"{tokenId}"}</p>
-          <p className="font-mono">POST /ideplugins/intellij/tasks</p>
-          <p className="font-mono">POST /ideplugins/intellij/tasks/{"{taskId}"}/ai-review</p>
-          <p className="font-mono">GET /tasks?type=IDE_AUDIT</p>
-          <p className="font-mono">GET /tasks?type=CODE_CHECK</p>
-        </CardContent>
-      </Card>
     </div>
   )
 }

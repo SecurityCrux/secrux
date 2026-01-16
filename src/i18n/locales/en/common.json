@@ -148,11 +148,6 @@
       "title": "IntelliJ Plugin",
       "subtitle": "Generate a long-lived access token and paste it into the IntelliJ plugin settings.",
       "copyError": "Failed to copy to clipboard.",
-      "connection": {
-        "title": "Connection",
-        "baseUrl": "API Base URL",
-        "headerHint": "Use this header in the plugin."
-      },
       "create": {
         "title": "Generate token",
         "name": "Token name (optional)",
@@ -178,9 +173,6 @@
         "revoke": "Revoke",
         "revoking": "Revoking...",
         "revokeError": "Failed to revoke token."
-      },
-      "apis": {
-        "title": "Plugin APIs"
       }
     }
   },
@@ -861,7 +853,7 @@
         "UNKNOWN": "Unknown"
       },
       "summary": {
-        "start": "Taint starts at {{value}}",
+        "start": "Flow starts at {{value}}",
         "propagate": "propagates to {{value}}",
         "end": "and finally reaches {{value}}",
         "separator": ", ",

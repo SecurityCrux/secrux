@@ -148,11 +148,6 @@
       "title": "IntelliJ 插件",
       "subtitle": "生成一个长期有效的访问令牌，并粘贴到 IntelliJ 插件设置中。",
       "copyError": "复制失败，请手动选择文本复制。",
-      "connection": {
-        "title": "连接信息",
-        "baseUrl": "API 地址",
-        "headerHint": "在插件中使用以下请求头。"
-      },
       "create": {
         "title": "生成令牌",
         "name": "令牌名称（可选）",
@@ -178,9 +173,6 @@
         "revoke": "吊销",
         "revoking": "吊销中...",
         "revokeError": "吊销令牌失败。"
-      },
-      "apis": {
-        "title": "插件接口"
       }
     }
   },
@@ -858,9 +850,9 @@
         "UNKNOWN": "未知"
       },
       "summary": {
-        "start": "污点从 {{value}} 开始",
+        "start": "链路从 {{value}} 开始",
         "propagate": "传递到 {{value}}",
-        "end": "最终流向 {{value}}",
+        "end": "最终到达 {{value}}",
         "separator": "，",
         "punct": "。"
       }
