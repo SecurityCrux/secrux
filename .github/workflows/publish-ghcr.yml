@@ -23,7 +23,7 @@ jobs:
       matrix:
         include:
           - image: secrux-semgrep-engine
-            dockerfile: Dockerfile
+            dockerfile: Dockerfile.semgrep
             build_args: |
               SEMGREP_IMAGE=semgrep/semgrep:latest
           - image: secrux-trivy-engine

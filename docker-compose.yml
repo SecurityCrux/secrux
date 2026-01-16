@@ -2,7 +2,7 @@ services:
   semgrep-engine:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.semgrep
       args:
         SEMGREP_IMAGE: ${SEMGREP_IMAGE:-semgrep/semgrep:latest}
     image: ${SECRUX_SEMGREP_ENGINE_IMAGE:-secrux-semgrep-engine:latest}
@@ -14,4 +14,3 @@ services:
       args:
         TRIVY_IMAGE: ${TRIVY_IMAGE:-aquasec/trivy:latest}
     image: ${SECRUX_TRIVY_ENGINE_IMAGE:-secrux-trivy-engine:latest}
-
