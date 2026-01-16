@@ -53,6 +53,7 @@ const ENGINE_BINDINGS: Record<TaskType, string[]> = {
   SECURITY_SCAN: [],
   SUPPLY_CHAIN: [],
   SCA_CHECK: ["trivy"],
+  IDE_AUDIT: [],
 }
 
 const REF_MODES = ["latest", "branch", "tag", "commit"] as const

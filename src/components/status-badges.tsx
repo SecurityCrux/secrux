@@ -30,6 +30,7 @@ const TASK_TYPE_LABEL_MAP: Record<string, string> = {
   SECURITY_SCAN: "SCAN",
   SUPPLY_CHAIN: "SUPPLY",
   SCA_CHECK: "SCA",
+  IDE_AUDIT: "IDE",
 }
 
 const TASK_TYPE_COLOR_MAP: Record<string, string> = {
@@ -37,6 +38,7 @@ const TASK_TYPE_COLOR_MAP: Record<string, string> = {
   SECURITY_SCAN: "border-sky-500/30 text-sky-600 dark:text-sky-300",
   SUPPLY_CHAIN: "border-amber-500/30 text-amber-600 dark:text-amber-300",
   SCA_CHECK: "border-fuchsia-500/30 text-fuchsia-600 dark:text-fuchsia-300",
+  IDE_AUDIT: "border-emerald-500/30 text-emerald-600 dark:text-emerald-300",
 }
 
 export function StatusBadge({ status }: { status?: string | null }) {

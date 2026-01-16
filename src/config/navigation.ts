@@ -12,6 +12,7 @@ import {
   Users,
   KeyRound,
   Building2,
+  Plug,
 } from "lucide-react"
 
 export type NavItem = {
@@ -37,6 +38,11 @@ export const navItems: NavItem[] = [
     labelKey: "nav.tasks",
     href: "/tasks/explorer",
     icon: Workflow,
+  },
+  {
+    labelKey: "nav.intellijPlugin",
+    href: "/ide-plugins/intellij",
+    icon: Plug,
   },
   {
     labelKey: "nav.rules",

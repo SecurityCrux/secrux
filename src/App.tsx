@@ -24,6 +24,7 @@ import { UserManagementPage } from "@/pages/users/user-management-page"
 import { RoleManagementPage } from "@/pages/iam/role-management-page"
 import { TenantPage } from "@/pages/tenant/tenant-page"
 import { FirstRunSetup } from "@/components/setup/first-run-setup"
+import { IntellijPluginPage } from "@/pages/ide-plugins/intellij-plugin-page"
 
 const router = createBrowserRouter([
   {
@@ -57,6 +58,10 @@ const router = createBrowserRouter([
       {
         path: "tasks/explorer",
         element: <TaskExplorerPage />,
+      },
+      {
+        path: "ide-plugins/intellij",
+        element: <IntellijPluginPage />,
       },
       {
         path: "rules",

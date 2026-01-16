@@ -35,28 +35,131 @@
 
 .dark {
   --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
-  --card-foreground: 210 40% 98%;
-  --popover: 222.2 84% 4.9%;
-  --popover-foreground: 210 40% 98%;
-  --primary: 210 40% 98%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
+  --foreground: 215 20% 92%;
+  --card: 222.2 84% 6.8%;
+  --card-foreground: 215 20% 92%;
+  --popover: 222.2 84% 6.8%;
+  --popover-foreground: 215 20% 92%;
+  --primary: 224.3 76.3% 48%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 217.2 32.6% 13.5%;
+  --secondary-foreground: 215 20% 92%;
+  --muted: 217.2 32.6% 12.5%;
   --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
+  --accent: 217.2 32.6% 14.5%;
+  --accent-foreground: 215 20% 92%;
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 212.7 26.8% 83.9%;
+  --border: 217.2 32.6% 13.5%;
+  --input: 217.2 32.6% 13.5%;
+  --ring: 224.3 76.3% 48%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
 }
 
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
   min-height: 100vh;
+}
+
+/* highlight.js (code snippets): fix dark-mode white background + improve contrast */
+.secrux-code-snippet code.hljs {
+  background: transparent;
+  padding: 0;
+  color: hsl(var(--foreground));
+}
+
+.light code.hljs,
+.dark code.hljs {
+  background: transparent;
+  display: block;
+}
+
+.dark code.hljs {
+  color: hsl(var(--foreground));
+}
+
+.dark .hljs-comment,
+.dark .hljs-quote {
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+.dark .hljs-subst {
+  color: hsl(var(--foreground));
+}
+
+.dark .hljs-tag {
+  color: hsl(213 94% 68%);
+}
+
+.dark .hljs-doctag,
+.dark .hljs-keyword,
+.dark .hljs-formula,
+.dark .hljs-literal,
+.dark .hljs-selector-tag,
+.dark .hljs-name {
+  color: hsl(213 94% 68%);
+}
+
+.dark .hljs-string,
+.dark .hljs-regexp,
+.dark .hljs-addition,
+.dark .hljs-attribute,
+.dark .hljs-template-tag,
+.dark .hljs-template-variable {
+  color: hsl(142 71% 70%);
+}
+
+.dark .hljs-number,
+.dark .hljs-symbol,
+.dark .hljs-bullet {
+  color: hsl(35 92% 70%);
+}
+
+.dark .hljs-title,
+.dark .hljs-section,
+.dark .hljs-function .hljs-title {
+  color: hsl(50 96% 70%);
+}
+
+.dark .hljs-type,
+.dark .hljs-class .hljs-title,
+.dark .hljs-built_in {
+  color: hsl(190 84% 70%);
+}
+
+.dark .hljs-attr,
+.dark .hljs-property,
+.dark .hljs-selector-attr,
+.dark .hljs-selector-class,
+.dark .hljs-selector-id {
+  color: hsl(280 80% 74%);
+}
+
+.dark .hljs-variable,
+.dark .hljs-params {
+  color: hsl(199 92% 70%);
+}
+
+.dark .hljs-meta,
+.dark .hljs-link {
+  color: hsl(190 84% 70%);
+}
+
+.dark .hljs-deletion {
+  color: hsl(0 84% 72%);
+}
+
+.dark .hljs-emphasis {
+  font-style: italic;
+}
+
+.dark .hljs-strong {
+  font-weight: 700;
 }
