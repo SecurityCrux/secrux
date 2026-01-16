@@ -33,11 +33,10 @@ Core modules:
 cp .env.example .env
 ```
 
-2. Start the full stack (infra + server + console + AI):
+2. Start the full stack (infra + server + console + AI; pull first, build locally on failure):
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
-docker compose -f docker/docker-compose.yml ps
+bash scripts/compose-up.sh
 ```
 
 2.1. (Optional, recommended for remote executors) Generate TLS certs for the Executor Gateway (so executors can run with `insecure=false`):

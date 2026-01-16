@@ -109,6 +109,7 @@ services:
       retries: 5
 
   ai-service:
+    image: ${SECRUX_AI_IMAGE:-ghcr.io/securitycrux/secrux-ai:latest}
     build:
       context: ../apps/ai
     restart: unless-stopped
@@ -146,6 +147,7 @@ services:
       retries: 5
 
   secrux-server:
+    image: ${SECRUX_SERVER_IMAGE:-ghcr.io/securitycrux/secrux-server:latest}
     build:
       context: ../apps/server
     restart: unless-stopped
@@ -206,6 +208,7 @@ services:
         condition: service_healthy
 
   secrux-console:
+    image: ${SECRUX_WEB_IMAGE:-ghcr.io/securitycrux/secrux-web:latest}
     build:
       context: ../apps/web
     restart: unless-stopped

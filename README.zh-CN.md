@@ -33,11 +33,10 @@ Secrux 是一个支持多租户、可单机部署的安全治理平台。
 cp .env.example .env
 ```
 
-2. 一键启动全栈（基础设施 + 控制面 + 控制台 + AI）：
+2. 一键启动全栈（基础设施 + 控制面 + 控制台 + AI，优先拉取镜像，失败则本地构建）：
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
-docker compose -f docker/docker-compose.yml ps
+bash scripts/compose-up.sh
 ```
 
 2.1.（可选，推荐给远端执行机）为 Executor Gateway 生成 TLS 证书（让执行机可保持 `insecure=false` 进行校验）：
