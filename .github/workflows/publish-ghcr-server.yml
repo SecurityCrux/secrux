@@ -26,8 +26,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ secrets.GHCR_USERNAME || github.actor }}
-          password: ${{ secrets.GHCR_TOKEN || github.token }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Resolve image tags
         id: meta
@@ -73,7 +73,7 @@ jobs:
 
       - name: Set package visibility to public
         env:
-          GH_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           OWNER: ${{ github.repository_owner }}
           PACKAGE: secrux-server
         run: |
