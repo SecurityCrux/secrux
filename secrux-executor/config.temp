@@ -1,0 +1,27 @@
+{
+     "server": "gateway.secrux.internal:5155",
+     "serverName": "gateway.secrux.internal",
+     "caCertPath": "../certs/executor-gateway/gateway-ca.crt",
+     "token": "EXECUTOR_TOKEN",
+     "insecure": false,
+     "engineImages": {
+       "semgrep": "ghcr.io/securitycrux/secrux-semgrep-engine:latest",
+       "trivy": "ghcr.io/securitycrux/secrux-trivy-engine:latest",
+       "grype": "ghcr.io/secrux/grype:1.0.2",
+       "dependency-check": "registry.local/dc:2024.10"
+     },
+     "trivy": {
+       "sanitizePomRepositories": true,
+       "bannedMavenRepoHosts": [
+         "dl.bintray.com",
+         "jcenter.bintray.com",
+         "repo.bintray.com"
+       ],
+       "filesystemCopyMode": "auto",
+       "timeoutSec": 1200,
+       "mavenRepositoryPath": "~/.m2/repository",
+       "mavenSettingsPath": "~/.m2/settings.xml",
+       "cacheHostPath": "~/.cache/secrux/trivy",
+       "inheritProxyEnv": true
+     }
+   }

@@ -1,0 +1,19 @@
+# Go build cache (GOCACHE override in sandboxed runs)
+/.gocache/
+# Go module cache (GOMODCACHE override in sandboxed runs)
+/.gomodcache/
+
+# Local executor config (contains tokens)
+config.json
+
+# Local TLS artifacts (do not commit)
+gateway.key
+gateway.crt
+
+# Build outputs
+/executor-agent
+/secrux-agent
+*.exe
+
+# Local env
+.env
