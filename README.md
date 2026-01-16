@@ -40,6 +40,7 @@ This is a **Go binary** (not a Docker container). The host running the agent mus
 	         "repo.bintray.com"
 	       ],
 	       "filesystemCopyMode": "auto",
+	       "timeoutSec": 1200,
 	       "mavenRepositoryPath": "~/.m2/repository",
 	       "mavenSettingsPath": "~/.m2/settings.xml",
 	       "cacheHostPath": "~/.cache/secrux/trivy",
@@ -101,6 +102,7 @@ and ensure `serverName` matches one of the SANs (defaults include `gateway.secru
   - `sanitizePomRepositories` (bool): Removes banned Maven repository URLs from `pom.xml` before scanning to reduce dependency resolution failures/timeouts.
   - `bannedMavenRepoHosts` (string[]): Hosts to remove from Maven repository URLs (defaults include Bintray/JCenter).
   - `filesystemCopyMode` (`auto` | `always` | `never`): Whether to copy the scan source dir before sanitizing `pom.xml`.
+  - `timeoutSec` (number): Overrides the Trivy task timeout in seconds when set (>0). Defaults to the task timeout or 20 minutes.
   - `mavenRepositoryPath` (string): Host path to mount into the Trivy container Maven cache (`/root/.m2/repository`, read-only).
   - `mavenSettingsPath` (string): Host path to mount as Maven `settings.xml` (`/root/.m2/settings.xml`, read-only).
   - `cacheHostPath` (string): Host path for Trivy cache persistence (mounted to `/tmp/trivy-cache`).

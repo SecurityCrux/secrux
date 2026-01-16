@@ -55,9 +55,10 @@ func main() {
 	log.Printf("loaded engine registry: %v", engineImageMap)
 	trivyConfig = cfg.Trivy
 	log.Printf(
-		"loaded trivy config: sanitizePomRepositories=%t filesystemCopyMode=%s bannedMavenRepoHosts=%v",
+		"loaded trivy config: sanitizePomRepositories=%t filesystemCopyMode=%s timeoutSec=%d bannedMavenRepoHosts=%v",
 		trivyConfig.SanitizePomRepositories,
 		trivyConfig.FilesystemCopyMode,
+		trivyConfig.TimeoutSec,
 		trivyConfig.BannedMavenRepoHosts,
 	)
 

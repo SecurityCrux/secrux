@@ -18,6 +18,7 @@
          "repo.bintray.com"
        ],
        "filesystemCopyMode": "auto",
+       "timeoutSec": 1200,
        "mavenRepositoryPath": "~/.m2/repository",
        "mavenSettingsPath": "~/.m2/settings.xml",
        "cacheHostPath": "~/.cache/secrux/trivy",

@@ -65,6 +65,9 @@ func parseConfig() Config {
 			if strings.TrimSpace(fileCfg.Trivy.FilesystemCopyMode) != "" {
 				cfg.Trivy.FilesystemCopyMode = strings.TrimSpace(fileCfg.Trivy.FilesystemCopyMode)
 			}
+			if fileCfg.Trivy.TimeoutSec > 0 {
+				cfg.Trivy.TimeoutSec = fileCfg.Trivy.TimeoutSec
+			}
 			if strings.TrimSpace(fileCfg.Trivy.MavenRepositoryPath) != "" {
 				cfg.Trivy.MavenRepositoryPath = expandUserPath(strings.TrimSpace(fileCfg.Trivy.MavenRepositoryPath))
 			}
@@ -126,6 +129,7 @@ func defaultTrivyConfig() TrivyConfig {
 			"repo.bintray.com",
 		},
 		FilesystemCopyMode:  "auto",
+		TimeoutSec:          0,
 		MavenRepositoryPath: mavenRepo,
 		MavenSettingsPath:   mavenSettings,
 		CacheHostPath:       cacheHostPath,

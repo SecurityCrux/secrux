@@ -32,6 +32,7 @@
      "trivy": {
        "sanitizePomRepositories": true,
        "filesystemCopyMode": "auto",
+       "timeoutSec": 1200,
        "mavenRepositoryPath": "~/.m2/repository",
        "mavenSettingsPath": "~/.m2/settings.xml",
        "cacheHostPath": "~/.cache/secrux/trivy",
@@ -82,6 +83,7 @@ docker compose up -d --force-recreate secrux-server
   - `sanitizePomRepositories`（bool）：扫描前清理 `pom.xml` 中的 Maven 仓库地址（移除黑名单 host），降低依赖解析失败/超时概率。
   - `bannedMavenRepoHosts`（string[]）：需要从 Maven 仓库 URL 中移除的 host（默认包含 Bintray/JCenter 等）。
   - `filesystemCopyMode`（`auto` | `always` | `never`）：是否在修改 `pom.xml` 前复制一份扫描目录，避免直接改动源目录。
+  - `timeoutSec`（number）：设置后覆盖 Trivy 任务超时（秒），默认使用任务超时或 20 分钟。
   - `mavenRepositoryPath`（string）：宿主机 Maven 本地仓库路径（只读挂载到容器 `/root/.m2/repository`）。
   - `mavenSettingsPath`（string）：宿主机 Maven `settings.xml` 路径（只读挂载到容器 `/root/.m2/settings.xml`）。
   - `cacheHostPath`（string）：宿主机 Trivy 缓存目录（挂载到容器 `/tmp/trivy-cache`，用于复用 DB/缓存）。
