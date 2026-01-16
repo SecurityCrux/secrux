@@ -1,0 +1,22 @@
+# uv / python env
+.venv/
+/.venv
+__pycache__/
+*.pyc
+
+# build artifacts
+.python-version
+dist/
+build/
+*.egg-info/
+
+# local config overrides
+config.yaml
+.env
+
+# local debug artifacts
+storage/prompt-dumps/*.jsonl
+
+# editor / os
+.DS_Store
+*.swp

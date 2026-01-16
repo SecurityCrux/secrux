@@ -1,0 +1,28 @@
+{
+  "tenantId": "tenant-123",
+  "taskId": "task-001",
+  "stageId": "stage-xyz",
+  "stageType": "SCAN_EXEC",
+  "taskType": "CODE_CHECK",
+  "projectId": "proj-123",
+  "correlationId": "corr-789",
+  "status": "SUCCEEDED",
+  "startedAt": "2025-01-01T00:00:00Z",
+  "endedAt": "2025-01-01T00:01:30Z",
+  "artifacts": [
+    "s3://bucket/corr-789/stage-xyz/sarif.json"
+  ],
+  "logExcerpt": [
+    "scan started",
+    "retrying shard 3 due to timeout",
+    "completed with warnings"
+  ],
+  "signals": {
+    "needsAiReview": true,
+    "autoFixPossible": false,
+    "riskDelta": 0.6
+  },
+  "metrics": {
+    "durationMs": 90000
+  }
+}

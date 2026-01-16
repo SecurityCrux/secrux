@@ -1,0 +1,13 @@
+[project]
+name = "file-reader-mcp"
+version = "0.1.0"
+description = "Sample MCP service that exposes safe file-reading tools."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.5",
+    "uvicorn>=0.30.0"
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
