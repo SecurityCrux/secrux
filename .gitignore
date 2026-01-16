@@ -23,11 +23,3 @@ deploy/production/control-plane/certs/
 **/__pycache__/
 **/*.pyc
 **/*.egg-info/
-
-# Secrux runtime artifacts
-secrux-ai/
-secrux-web/
-secrux-engine/
-secrux-executor/
-secrux-intellij-plugin/
-secrux-server/
