@@ -1,0 +1,12 @@
+.gradle/
+.intellijPlatform/
+.gradle-user-home/
+.kotlin/
+build/
+out/
+bin/
+.idea/
+.run/
+*.iml
+*.ipr
+*.iws
