@@ -10,7 +10,6 @@ import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
-import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.panels.VerticalLayout
 import com.intellij.util.ui.JBUI
@@ -28,12 +27,18 @@ import com.securitycrux.secrux.intellij.services.SinkScanService
 import com.securitycrux.secrux.intellij.settings.SecruxConfigDialog
 import com.securitycrux.secrux.intellij.settings.SecruxTokenStore
 import java.awt.BorderLayout
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.LayoutManager
+import java.awt.Rectangle
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JPanel
+import javax.swing.ScrollPaneConstants
+import javax.swing.Scrollable
 import javax.swing.ListSelectionModel
+import javax.swing.JTextArea
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 
@@ -58,7 +63,11 @@ class SecruxToolWindowPanel(
     private val clearMemoButton = JButton()
 
     private val sinksStatusLabel = JBLabel()
-    private val callGraphStatusLabel = JBLabel()
+    private val callGraphStatusLabel =
+        WrappingStatusText().apply {
+            font = sinksStatusLabel.font
+            foreground = sinksStatusLabel.foreground
+        }
     private val tokenStatusLabel = JBLabel()
     private val memoTitleLabel = JBLabel()
 
@@ -136,7 +145,7 @@ class SecruxToolWindowPanel(
         clearMemoButton.addActionListener { memoService.clear() }
 
         val root =
-            JBPanel<JBPanel<*>>(VerticalLayout(JBUI.scale(8))).apply {
+            WidthTrackingScrollPanel(VerticalLayout(JBUI.scale(8))).apply {
                 border = JBUI.Borders.empty(8)
             }
 
@@ -186,7 +195,11 @@ class SecruxToolWindowPanel(
         root.add(memoTitleLabel)
         root.add(JBScrollPane(memoList).apply { preferredSize = JBUI.size(0, 180) })
 
-        setContent(JBScrollPane(root))
+        setContent(
+            JBScrollPane(root).apply {
+                horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            }
+        )
 
         setMemoItems(memoService.getItems())
         refreshTexts()
@@ -368,6 +381,62 @@ class SecruxToolWindowPanel(
                 else -> OpenFileDescriptor(project, file, item.offset.coerceAtLeast(0))
             }
         descriptor.navigate(true)
+    }
+
+    private class WrappingStatusText : JTextArea() {
+        init {
+            isEditable = false
+            isFocusable = false
+            isOpaque = false
+            lineWrap = true
+            wrapStyleWord = true
+            border = JBUI.Borders.empty()
+            margin = JBUI.insets(0)
+        }
+
+        override fun setText(t: String?) {
+            super.setText(t)
+            revalidate()
+            repaint()
+        }
+
+        override fun getPreferredSize(): Dimension {
+            val parentWidth = parent?.width ?: 0
+            if (parentWidth <= 0) return super.getPreferredSize()
+            val insets = insets
+            val availableWidth = (parentWidth - insets.left - insets.right).coerceAtLeast(0)
+            if (availableWidth <= 0) return super.getPreferredSize()
+
+            val oldSize = size
+            setSize(availableWidth, Int.MAX_VALUE)
+            val wrapped = super.getPreferredSize()
+            setSize(oldSize)
+            return Dimension(parentWidth, wrapped.height)
+        }
+
+        override fun getMaximumSize(): Dimension = Dimension(Int.MAX_VALUE, preferredSize.height)
+    }
+
+    private class WidthTrackingScrollPanel(
+        layout: LayoutManager,
+    ) : JPanel(layout), Scrollable {
+        override fun getPreferredScrollableViewportSize(): Dimension = preferredSize
+
+        override fun getScrollableUnitIncrement(
+            visibleRect: Rectangle,
+            orientation: Int,
+            direction: Int,
+        ): Int = JBUI.scale(16)
+
+        override fun getScrollableBlockIncrement(
+            visibleRect: Rectangle,
+            orientation: Int,
+            direction: Int,
+        ): Int = (visibleRect.height - JBUI.scale(16)).coerceAtLeast(JBUI.scale(16))
+
+        override fun getScrollableTracksViewportWidth(): Boolean = true
+
+        override fun getScrollableTracksViewportHeight(): Boolean = false
     }
 
     private fun sectionLabel(): JBLabel =

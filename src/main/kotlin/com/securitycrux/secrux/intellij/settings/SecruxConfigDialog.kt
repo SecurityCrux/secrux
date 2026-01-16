@@ -6,6 +6,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPasswordField
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.components.panels.VerticalLayout
 import com.intellij.util.ui.JBUI
@@ -14,10 +15,14 @@ import com.securitycrux.secrux.intellij.secrux.SelectSecruxTaskDialog
 import com.securitycrux.secrux.intellij.sinks.SinkCatalog
 import java.awt.BorderLayout
 import java.awt.Dimension
+import java.awt.LayoutManager
+import java.awt.Rectangle
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.ScrollPaneConstants
+import javax.swing.Scrollable
 
 class SecruxConfigDialog(
     private val project: Project
@@ -113,7 +118,7 @@ class SecruxConfigDialog(
     override fun createCenterPanel(): JComponent {
         val panel = JPanel(BorderLayout())
         val form =
-            JPanel(VerticalLayout(JBUI.scale(8))).apply {
+            WidthTrackingScrollPanel(VerticalLayout(JBUI.scale(8))).apply {
                 border = JBUI.Borders.empty(8)
             }
 
@@ -216,7 +221,12 @@ class SecruxConfigDialog(
             }
         )
 
-        panel.add(form, BorderLayout.CENTER)
+        panel.add(
+            JBScrollPane(form).apply {
+                horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            },
+            BorderLayout.CENTER
+        )
         return panel
     }
 
@@ -263,5 +273,27 @@ class SecruxConfigDialog(
                     SecruxBundle.message("label.tokenStatus.notSet")
                 }
         }
+    }
+
+    private class WidthTrackingScrollPanel(
+        layout: LayoutManager,
+    ) : JPanel(layout), Scrollable {
+        override fun getPreferredScrollableViewportSize(): Dimension = preferredSize
+
+        override fun getScrollableUnitIncrement(
+            visibleRect: Rectangle,
+            orientation: Int,
+            direction: Int,
+        ): Int = JBUI.scale(16)
+
+        override fun getScrollableBlockIncrement(
+            visibleRect: Rectangle,
+            orientation: Int,
+            direction: Int,
+        ): Int = (visibleRect.height - JBUI.scale(16)).coerceAtLeast(JBUI.scale(16))
+
+        override fun getScrollableTracksViewportWidth(): Boolean = true
+
+        override fun getScrollableTracksViewportHeight(): Boolean = false
     }
 }

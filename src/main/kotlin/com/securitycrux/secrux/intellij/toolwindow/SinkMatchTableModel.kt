@@ -1,6 +1,7 @@
 package com.securitycrux.secrux.intellij.toolwindow
 
 import com.intellij.openapi.project.Project
+import com.securitycrux.secrux.intellij.callgraph.MethodRef
 import com.securitycrux.secrux.intellij.i18n.SecruxBundle
 import com.securitycrux.secrux.intellij.sinks.SinkMatch
 import java.util.concurrent.atomic.AtomicReference
@@ -43,38 +44,42 @@ class SinkMatchTableModel(
 
     override fun getColumnName(column: Int): String = columns.getOrElse(column) { "" }
 
-    override fun getColumnClass(columnIndex: Int): Class<*> =
-        when (columnIndex) {
-            1 -> Int::class.java
-            else -> String::class.java
-        }
+    override fun getColumnClass(columnIndex: Int): Class<*> = String::class.java
 
     override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
         val row = rowsRef.get().getOrNull(rowIndex) ?: return ""
         val match = row.primary
         return when (columnIndex) {
             0 -> row.typesDisplay
-            1 -> row.count
-            2 -> "${match.targetClassFqn}#${match.targetMember}"
-            3 -> relativePath(match.file.path)
-            4 -> "${match.line}:${match.column}"
-            5 -> match.enclosingMethodFqn ?: ""
+            1 -> "${shortClass(match.targetClassFqn)}#${match.targetMember}"
+            2 ->
+                match.enclosingMethodId
+                    ?.let(MethodRef::fromIdOrNull)
+                    ?.let(::shortMethod)
+                    ?: match.enclosingMethodFqn?.let(::shortEnclosingMethodFqn).orEmpty()
             else -> ""
         }
     }
 
-    private fun relativePath(absolutePath: String): String {
-        val basePath = project.basePath ?: return absolutePath
-        return absolutePath.removePrefix(basePath).removePrefix("/")
+    private fun shortClass(classFqn: String): String = classFqn.substringAfterLast('.')
+
+    private fun shortMethod(ref: MethodRef): String = "${shortClass(ref.classFqn)}#${ref.name}"
+
+    private fun shortEnclosingMethodFqn(enclosingMethodFqn: String): String {
+        val raw = enclosingMethodFqn.trim()
+        val noArgs = raw.substringBefore('(').trim()
+        val separatorIndex = maxOf(noArgs.lastIndexOf('#'), noArgs.lastIndexOf('.'))
+        if (separatorIndex < 0) return noArgs
+        val classPart = noArgs.substring(0, separatorIndex).trim()
+        val methodPart = noArgs.substring(separatorIndex + 1).trim()
+        if (classPart.isBlank()) return methodPart
+        return "${shortClass(classPart)}#$methodPart"
     }
 
     private fun buildColumns(): List<String> =
         listOf(
             SecruxBundle.message("table.column.type"),
-            SecruxBundle.message("table.column.count"),
             SecruxBundle.message("table.column.target"),
-            SecruxBundle.message("table.column.file"),
-            SecruxBundle.message("table.column.line"),
             SecruxBundle.message("table.column.enclosing")
         )
 }

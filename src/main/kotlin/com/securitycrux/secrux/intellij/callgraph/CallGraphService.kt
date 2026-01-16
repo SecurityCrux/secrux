@@ -1,7 +1,6 @@
 package com.securitycrux.secrux.intellij.callgraph
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
@@ -1922,7 +1921,7 @@ class CallGraphService(
         fileIndex: ProjectFileIndex,
         excludedPathRegex: Regex?,
     ): List<VirtualFile> =
-        ReadAction.compute<List<VirtualFile>, RuntimeException> {
+        DumbService.getInstance(project).runReadActionInSmartMode<List<VirtualFile>> {
             val javaFiles = FilenameIndex.getAllFilesByExt(project, "java", scope)
             val kotlinFiles = FilenameIndex.getAllFilesByExt(project, "kt", scope)
 
@@ -1938,6 +1937,8 @@ class CallGraphService(
 
     private fun computeProjectFingerprint(sourceFiles: List<VirtualFile>): String {
         val md = MessageDigest.getInstance("SHA-256")
+        md.update(CACHE_FINGERPRINT_SALT.toByteArray(Charsets.UTF_8))
+        md.update(0)
         val inputs =
             sourceFiles
                 .asSequence()
@@ -1983,6 +1984,7 @@ class CallGraphService(
         var edgeCount = 0
 
         val overrideTargetsCache = hashMapOf<PsiMethod, List<MethodRef>>()
+        val dumbService = DumbService.getInstance(project)
 
         val total = sourceFiles.size.coerceAtLeast(1)
         for ((i, file) in sourceFiles.withIndex()) {
@@ -1990,9 +1992,13 @@ class CallGraphService(
             indicator.text = SecruxBundle.message("progress.buildingCallGraphFile", file.name)
             indicator.fraction = i.toDouble() / total.toDouble()
 
-            ReadAction.run<RuntimeException> {
-                val psiFile = psiManager.findFile(file) ?: return@run
-                val uFile = psiFile.toUElementOfType<UFile>() ?: return@run
+            if (dumbService.isDumb) {
+                indicator.text = "Indexing in progress; waiting for smart mode"
+            }
+
+            dumbService.runReadActionInSmartMode {
+                val psiFile = psiManager.findFile(file) ?: return@runReadActionInSmartMode
+                val uFile = psiFile.toUElementOfType<UFile>() ?: return@runReadActionInSmartMode
 
                 uFile.accept(
                     object : AbstractUastVisitor() {
@@ -2133,25 +2139,51 @@ class CallGraphService(
                             return false
                         }
 
-                        override fun visitCallExpression(node: UCallExpression): Boolean {
-                            val callerMethod = findEnclosingMethod(node) ?: return false
-                            val callerRef = callerMethod.javaPsi.toMethodRefOrNull() ?: return false
+	                        override fun visitCallExpression(node: UCallExpression): Boolean {
+	                            val callerMethod = findEnclosingMethod(node) ?: return false
+	                            val callerRef = callerMethod.javaPsi.toMethodRefOrNull() ?: return false
 
-                            val callOffset =
-                                node.sourcePsi?.textRange?.startOffset
-                                    ?: node.methodIdentifier?.sourcePsi?.textRange?.startOffset
+	                            val qualifiedParent = node.uastParent as? UQualifiedReferenceExpression
+	                            val qualifiedAsSelector = qualifiedParent?.takeIf { it.selector == node }
 
-                            val receiverToken =
-                                node.receiver?.let { receiverExpr ->
-                                    valueTokenForExpression(callerMethod, callerRef, receiverExpr)
-                                }
+	                            val callOffset =
+	                                node.sourcePsi?.textRange?.startOffset
+	                                    ?: node.methodIdentifier?.sourcePsi?.textRange?.startOffset
+	                                    ?: qualifiedAsSelector?.sourcePsi?.textRange?.startOffset
+
+	                            val receiverExpr = node.receiver ?: qualifiedAsSelector?.receiver
+	                            val receiverToken =
+	                                receiverExpr?.let { valueTokenForExpression(callerMethod, callerRef, it) }
 
                             val argTokens =
                                 node.valueArguments.map { arg ->
                                     valueTokenForExpression(callerMethod, callerRef, arg)
                                 }
 
-                            val resultToken = resolveCallResultToken(callerMethod, callerRef, node)
+	                            val resultToken = callOffset?.let { "$CALL_RESULT_TOKEN_PREFIX$it" }
+	                            // When a call result is assigned/returned, record a directed COPY edge so value-flow can trace `target <= CALLRET@offset`
+	                            // even if some UAST nodes do not expose `UVariable`/assignment structure as expected.
+	                            if (resultToken != null) {
+	                                val targetToken = resolveCallResultToken(callerMethod, callerRef, node)
+	                                val isSupportedTarget =
+	                                    targetToken != null &&
+	                                        targetToken != OTHER_RECEIVER_TOKEN &&
+	                                        (
+	                                            targetToken.startsWith("LOCAL:") ||
+	                                                targetToken.startsWith("PARAM:") ||
+	                                                targetToken == RETURN_VALUE_TOKEN ||
+	                                                targetToken == THIS_RECEIVER_TOKEN
+	                                        )
+	                                if (isSupportedTarget && targetToken != resultToken) {
+	                                    rawAliasEdgesByMethod.getOrPut(callerRef) { mutableListOf() }.add(
+	                                        RawAliasEdge(
+	                                            leftToken = targetToken!!,
+	                                            rightToken = resultToken,
+	                                            offset = callOffset,
+	                                        )
+	                                    )
+	                                }
+	                            }
 
                             val calleePsi = node.resolve() as? PsiMethod
                             val calleeRef = calleePsi?.toMethodRefOrNull()
@@ -2232,24 +2264,38 @@ class CallGraphService(
                         private fun tokenForPsiVariable(enclosingMethod: UMethod, variable: PsiVariable): String? {
                             val name = variable.name?.takeIf { it.isNotBlank() } ?: return null
                             if (variable is com.intellij.psi.PsiParameter) {
-                                val byIdentity =
-                                    enclosingMethod.javaPsi.parameterList.parameters
-                                        .indexOfFirst { it == variable }
-                                val byName =
-                                    if (byIdentity >= 0) byIdentity else
-                                        enclosingMethod.javaPsi.parameterList.parameters
-                                            .indexOfFirst { it.name == name }
-                                return if (byName >= 0) {
-                                    "PARAM:$byName"
-                                } else {
-                                    "PARAM:$name"
+                                fun findIndex(params: List<com.intellij.psi.PsiParameter>): Int {
+                                    val byIdentity = params.indexOfFirst { it == variable }
+                                    if (byIdentity >= 0) return byIdentity
+
+                                    val byEquivalent = params.indexOfFirst { it.isEquivalentTo(variable) }
+                                    if (byEquivalent >= 0) return byEquivalent
+
+                                    val byName = params.indexOfFirst { it.name == name }
+                                    if (byName >= 0) return byName
+
+                                    val byTextRange =
+                                        variable.textRange?.startOffset?.let { start ->
+                                            params.indexOfFirst { it.textRange?.startOffset == start && it.name == name }
+                                        } ?: -1
+                                    return byTextRange
                                 }
+
+                                val uastParams =
+                                    enclosingMethod.uastParameters
+                                        .mapNotNull { it.javaPsi as? com.intellij.psi.PsiParameter }
+                                val idx = findIndex(uastParams).takeIf { it >= 0 }
+                                    ?: findIndex(enclosingMethod.javaPsi.parameterList.parameters.toList()).takeIf { it >= 0 }
+                                    ?: return null
+                                return "PARAM:$idx"
                             }
                             return "LOCAL:$name"
                         }
 
                         private fun recordLocalAlias(methodRef: MethodRef, left: String, right: String) {
-                            aliasByMethod.getOrPut(methodRef) { UnionFind() }.union(left, right)
+                            // NOTE: We intentionally avoid building a flow-insensitive union-find over locals here.
+                            // Assignments are recorded as directed RawAliasEdge edges (see visitBinaryExpression/visitVariable),
+                            // and value-flow/points-to handle propagation with offset-awareness.
                         }
 
                         private fun receiverTokenForQualified(
@@ -2288,11 +2334,11 @@ class CallGraphService(
                             }
                         }
 
-                        private fun valueTokenForExpression(
-                            enclosingMethod: UMethod,
-                            methodRef: MethodRef,
-                            expr: UElement?
-                        ): String? {
+	                        private fun valueTokenForExpression(
+	                            enclosingMethod: UMethod,
+	                            methodRef: MethodRef,
+	                            expr: UElement?
+	                        ): String? {
                             val element = expr ?: return null
                             return when (element) {
                                 is UParenthesizedExpression ->
@@ -2319,11 +2365,19 @@ class CallGraphService(
                                     }
                                 }
 
-                                is UQualifiedReferenceExpression -> {
-                                    val resolved = element.resolve() as? PsiField ?: return null
-                                    val owner = resolved.containingClass?.qualifiedName ?: return null
-                                    val receiverToken =
-                                        if (resolved.hasModifierProperty(PsiModifier.STATIC)) {
+	                                is UQualifiedReferenceExpression -> {
+	                                    // Qualified method calls may be wrapped as `UQualifiedReferenceExpression(selector=UCallExpression)`.
+	                                    // Treat them as call-results to avoid losing data-flow tokens in initializers/assignments/args.
+	                                    val selectorCall = element.selector as? UCallExpression
+	                                    if (selectorCall != null) {
+	                                        return callResultTokenForCallExpression(selectorCall)
+	                                            ?: element.sourcePsi?.textRange?.startOffset?.let { "$CALL_RESULT_TOKEN_PREFIX$it" }
+	                                    }
+
+	                                    val resolved = element.resolve() as? PsiField ?: return null
+	                                    val owner = resolved.containingClass?.qualifiedName ?: return null
+	                                    val receiverToken =
+	                                        if (resolved.hasModifierProperty(PsiModifier.STATIC)) {
                                             null
                                         } else {
                                             receiverTokenForQualified(enclosingMethod, methodRef, element)
@@ -2341,22 +2395,39 @@ class CallGraphService(
                             }
                         }
 
-                        private fun callResultTokenForCallExpression(node: UCallExpression): String? {
-                            val offset = node.sourcePsi?.textRange?.startOffset ?: return null
-                            return "$CALL_RESULT_TOKEN_PREFIX$offset"
-                        }
+	                        private fun callResultTokenForCallExpression(node: UCallExpression): String? {
+	                            val offset =
+	                                node.sourcePsi?.textRange?.startOffset
+	                                    ?: node.methodIdentifier?.sourcePsi?.textRange?.startOffset
+	                                    ?: return null
+	                            return "$CALL_RESULT_TOKEN_PREFIX$offset"
+	                        }
 
-                        private fun resolveCallResultToken(
-                            enclosingMethod: UMethod,
-                            callerRef: MethodRef,
-                            node: UCallExpression,
-                        ): String? {
-                            var current: UElement = node
-                            var parent: UElement? = node.uastParent
-                            while (parent is UParenthesizedExpression) {
-                                current = parent
-                                parent = parent.uastParent
-                            }
+	                        private fun resolveCallResultToken(
+	                            enclosingMethod: UMethod,
+	                            callerRef: MethodRef,
+	                            node: UCallExpression,
+	                        ): String? {
+	                            var current: UElement = node
+	                            var parent: UElement? = node.uastParent
+	                            while (true) {
+	                                when (parent) {
+	                                    is UParenthesizedExpression -> {
+	                                        current = parent
+	                                        parent = parent.uastParent
+	                                        continue
+	                                    }
+	                                    is UQualifiedReferenceExpression -> {
+	                                        // Only unwrap when the call is the selector (not the receiver) of a qualified expression.
+	                                        if (parent.selector == current) {
+	                                            current = parent
+	                                            parent = parent.uastParent
+	                                            continue
+	                                        }
+	                                    }
+	                                }
+	                                break
+	                            }
 
                             when (parent) {
                                 is UBinaryExpression -> {
@@ -2438,27 +2509,85 @@ class CallGraphService(
                             return false
                         }
 
-                        override fun visitBinaryExpression(node: UBinaryExpression): Boolean {
-                            if (node.operator != UastBinaryOperator.ASSIGN) return false
+	                        override fun visitVariable(node: UVariable): Boolean {
+	                            val initializer = node.uastInitializer ?: return false
+	                            val psi = node.javaPsi
+	                            if (psi is PsiField) return false
+	                            if (psi is com.intellij.psi.PsiParameter) return false
+
                             val enclosing = findEnclosingMethod(node) ?: return false
                             val methodRef = enclosing.javaPsi.toMethodRefOrNull() ?: return false
+	                            val name = node.name?.takeIf { it.isNotBlank() } ?: return false
+	 
+	                            val leftToken = "LOCAL:$name"
+	                            val rightToken = valueTokenForExpression(enclosing, methodRef, initializer) ?: return false
+	                            // Prefer RHS offset so later expansions (e.g., CALLRET@...) are not filtered out by contextOffset.
+	                            val offset = initializer.sourcePsi?.textRange?.startOffset ?: node.sourcePsi?.textRange?.startOffset
 
-                            val leftVar = resolveVariableToken(enclosing, node.leftOperand)
-                            val rightToken = valueTokenForExpression(enclosing, methodRef, node.rightOperand)
-                            if (leftVar != null && rightToken != null) {
-                                recordLocalAlias(methodRef, left = leftVar, right = rightToken)
-                                if (leftVar != rightToken) {
-                                    rawAliasEdgesByMethod.getOrPut(methodRef) { mutableListOf() }.add(
-                                        RawAliasEdge(
-                                            leftToken = leftVar,
-                                            rightToken = rightToken,
-                                            offset = node.sourcePsi?.textRange?.startOffset,
+                            if (leftToken != rightToken) {
+                                rawAliasEdgesByMethod.getOrPut(methodRef) { mutableListOf() }.add(
+                                    RawAliasEdge(
+                                        leftToken = leftToken,
+                                        rightToken = rightToken,
+                                        offset = offset,
+                                    )
+                                )
+                            }
+
+                            val rhsField = resolveField(initializer)
+                            if (rhsField != null) {
+                                val receiverToken =
+                                    if (rhsField.hasModifierProperty(PsiModifier.STATIC)) {
+                                        null
+                                    } else {
+                                        when (initializer) {
+                                            is UQualifiedReferenceExpression -> receiverTokenForQualified(enclosing, methodRef, initializer)
+                                            is USimpleNameReferenceExpression -> null
+                                            else -> OTHER_RECEIVER_TOKEN
+                                        }
+                                    }
+
+                                val owner = rhsField.containingClass?.qualifiedName
+                                if (owner != null) {
+                                    rawFieldLoadsByMethod.getOrPut(methodRef) { mutableListOf() }.add(
+                                        RawFieldLoad(
+                                            ownerFqn = owner,
+                                            fieldName = rhsField.name,
+                                            isStatic = rhsField.hasModifierProperty(PsiModifier.STATIC),
+                                            receiverToken = receiverToken,
+                                            targetToken = leftToken,
+                                            offset = offset,
                                         )
                                     )
                                 }
                             }
 
-                            val assignOffset = node.sourcePsi?.textRange?.startOffset
+                            return false
+                        }
+
+	                        override fun visitBinaryExpression(node: UBinaryExpression): Boolean {
+	                            if (node.operator != UastBinaryOperator.ASSIGN) return false
+	                            val enclosing = findEnclosingMethod(node) ?: return false
+	                            val methodRef = enclosing.javaPsi.toMethodRefOrNull() ?: return false
+	                            val rhsOffset = node.rightOperand.sourcePsi?.textRange?.startOffset
+
+	                            val leftVar = resolveVariableToken(enclosing, node.leftOperand)
+	                            val rightToken = valueTokenForExpression(enclosing, methodRef, node.rightOperand)
+	                            if (leftVar != null && rightToken != null) {
+	                                recordLocalAlias(methodRef, left = leftVar, right = rightToken)
+	                                if (leftVar != rightToken) {
+	                                    rawAliasEdgesByMethod.getOrPut(methodRef) { mutableListOf() }.add(
+	                                        RawAliasEdge(
+	                                            leftToken = leftVar,
+	                                            rightToken = rightToken,
+	                                            // Prefer RHS offset so CALLRET@... can still expand at the same statement.
+	                                            offset = rhsOffset ?: node.sourcePsi?.textRange?.startOffset,
+	                                        )
+	                                    )
+	                                }
+	                            }
+
+	                            val assignOffset = rhsOffset ?: node.sourcePsi?.textRange?.startOffset
 
                             val lhsField = resolveField(node.leftOperand)
                             if (lhsField != null) {
@@ -2519,12 +2648,13 @@ class CallGraphService(
                             return false
                         }
 
-                        override fun visitReturnExpression(node: UReturnExpression): Boolean {
-                            val enclosing = findEnclosingMethod(node) ?: return false
-                            val methodRef = enclosing.javaPsi.toMethodRefOrNull() ?: return false
+	                        override fun visitReturnExpression(node: UReturnExpression): Boolean {
+	                            val enclosing = findEnclosingMethod(node) ?: return false
+	                            val methodRef = enclosing.javaPsi.toMethodRefOrNull() ?: return false
 
-                            val returned = node.returnExpression ?: return false
-                            val offset = node.sourcePsi?.textRange?.startOffset ?: returned.sourcePsi?.textRange?.startOffset
+	                            val returned = node.returnExpression ?: return false
+	                            // Prefer the returned expression offset (not the `return` keyword) to keep CALLRET@ expansions valid.
+	                            val offset = returned.sourcePsi?.textRange?.startOffset ?: node.sourcePsi?.textRange?.startOffset
 
                             val field = resolveField(returned)
                             if (field != null) {
@@ -3010,7 +3140,12 @@ class CallGraphService(
 
     private fun PsiModifierListOwner.hasAnyAnnotationExact(annotationFqns: Set<String>): Boolean {
         val annotations = modifierList?.annotations ?: return false
-        return annotations.any { ann -> ann.qualifiedName != null && ann.qualifiedName in annotationFqns }
+        return annotations.any { ann ->
+            runCatching {
+                val qName = ann.qualifiedName ?: return@runCatching false
+                qName in annotationFqns
+            }.getOrDefault(false)
+        }
     }
 
     private fun PsiModifierListOwner.hasAnyMetaAnnotation(metaAnnotationFqns: Set<String>): Boolean {
@@ -3019,10 +3154,12 @@ class CallGraphService(
     }
 
     private fun PsiAnnotation.isAnnotationIn(annotationFqns: Set<String>): Boolean {
-        val qName = qualifiedName
-        if (qName != null) return qName in annotationFqns
-        val short = nameReferenceElement?.referenceName ?: return false
-        return annotationFqns.any { it.endsWith(".$short") }
+        return runCatching {
+            val qName = qualifiedName
+            if (qName != null) return@runCatching qName in annotationFqns
+            val short = nameReferenceElement?.referenceName ?: return@runCatching false
+            annotationFqns.any { it.endsWith(".$short") }
+        }.getOrDefault(false)
     }
 
     private fun PsiAnnotation.isMetaAnnotatedWithAny(metaAnnotationFqns: Set<String>): Boolean {
@@ -3031,7 +3168,7 @@ class CallGraphService(
     }
 
     private fun PsiAnnotation.resolveAnnotationClass(): PsiClass? {
-        return nameReferenceElement?.resolve() as? PsiClass
+        return runCatching { nameReferenceElement?.resolve() as? PsiClass }.getOrNull()
     }
 
     private fun com.intellij.psi.PsiType.isStreamObserverType(): Boolean {
@@ -3040,6 +3177,9 @@ class CallGraphService(
     }
 
     companion object {
+        // Bump this when index building logic changes to avoid loading stale cached graphs/summaries.
+        private const val CACHE_FINGERPRINT_SALT = "secrux-index:v2"
+
         private val SPRING_CONTROLLER_ANNOTATIONS =
             setOf(
                 "org.springframework.stereotype.Controller",

@@ -59,6 +59,9 @@
             <action
                     id="Secrux.ClearCallGraphCache"
                     class="com.securitycrux.secrux.intellij.actions.ClearCallGraphCacheAction"/>
+            <action
+                    id="Secrux.TraceValueFlowAtCaret"
+                    class="com.securitycrux.secrux.intellij.actions.TraceValueFlowAtCaretAction"/>
             <separator/>
             <action
                     id="Secrux.AddToAuditMemo"

@@ -1,12 +1,16 @@
 package com.securitycrux.secrux.intellij.enrichment
 
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiManager
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.util.PsiTreeUtil
 import java.time.Instant
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -21,6 +25,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtPropertyAccessor
 import org.jetbrains.uast.UCallExpression
 import org.jetbrains.uast.UFile
 import org.jetbrains.uast.UForExpression
@@ -34,6 +40,18 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor
 class SecruxPsiUastEnrichmentService(
     private val project: Project
 ) {
+    private companion object {
+        const val MAX_NODE_METHODS = 80
+        const val MAX_METHOD_EXCERPT_LINES = 160
+        const val MAX_METHOD_EXCERPT_CHARS = 40_000
+        const val MAX_METHOD_LINE_CHARS = 800
+        const val MAX_INVOCATIONS = 200
+        const val MAX_CONDITIONS = 200
+        const val MAX_CALL_ARG_IDENTIFIERS = 6
+        const val MAX_CALL_TEXT_CHARS = 800
+        const val MAX_CONDITION_TEXT_CHARS = 600
+    }
+
     private val psiManager = PsiManager.getInstance(project)
     private val psiDocumentManager = PsiDocumentManager.getInstance(project)
     private val fileDocumentManager = FileDocumentManager.getInstance()
@@ -47,7 +65,8 @@ class SecruxPsiUastEnrichmentService(
     ): JsonObject? =
         ReadAction.compute<JsonObject?, RuntimeException> {
             val primary = buildPrimary(primaryFile, primaryOffset, primaryPath, primaryLine)
-            val nodeMethods = buildDataflowNodeMethods(dataflow)
+            val nodeMethodsResult = buildDataflowNodeMethods(dataflow)
+            val nodeMethods = nodeMethodsResult.methods
             val blocks = buildBlocks(primary = primary, nodeMethods = nodeMethods)
 
             buildJsonObject {
@@ -62,6 +81,10 @@ class SecruxPsiUastEnrichmentService(
                     put("nodes", nodes)
                     put("edges", edges)
                     put("nodeMethods", nodeMethods)
+                    if (nodeMethodsResult.truncated) {
+                        put("nodeMethodsTruncated", true)
+                        put("nodeMethodsLimit", MAX_NODE_METHODS)
+                    }
                 }
             }
         }
@@ -210,7 +233,7 @@ class SecruxPsiUastEnrichmentService(
         val psiFile = psiManager.findFile(file) ?: return null
         val document = psiDocumentManager.getDocument(psiFile) ?: fileDocumentManager.getDocument(file) ?: return null
         val method = findEnclosingMethod(psiFile, offset) ?: return null
-        val methodSummary = buildMethodSummary(method, document) ?: return null
+        val methodSummary = buildMethodSummary(method, document, highlightLine = line) ?: return null
         val invocations = collectInvocations(method, document)
         val conditions = collectConditions(method, document)
 
@@ -223,26 +246,40 @@ class SecruxPsiUastEnrichmentService(
         }
     }
 
-    private fun buildDataflowNodeMethods(dataflow: JsonObject): JsonArray {
-        val nodes = (dataflow["nodes"] as? JsonArray) ?: return JsonArray(emptyList())
+    private fun buildDataflowNodeMethods(dataflow: JsonObject): NodeMethodsResult {
+        val nodes = (dataflow["nodes"] as? JsonArray) ?: return NodeMethodsResult(JsonArray(emptyList()), truncated = false)
         val seen = HashSet<String>()
-        return buildJsonArray {
-            for (node in nodes) {
-                val obj = node as? JsonObject ?: continue
-                val nodeId = obj.stringOrNull("id") ?: continue
-                val label = obj.stringOrNull("label") ?: nodeId
-                val role = obj.stringOrNull("role")
-                val filePath = obj.stringOrNull("file") ?: continue
-                val line = obj.intOrNull("line") ?: continue
-                val startColumn = obj.intOrNull("startColumn") ?: 1
-                val uniqueKey = "$filePath:$line:$startColumn"
-                if (!seen.add(uniqueKey)) continue
+        var truncated = false
+        var added = 0
+        val nodeMethods =
+            buildJsonArray {
+                for (node in nodes) {
+                    if (added >= MAX_NODE_METHODS) {
+                        truncated = true
+                        break
+                    }
+                    val obj = node as? JsonObject ?: continue
+                    val nodeId = obj.stringOrNull("id") ?: continue
+                    val label = obj.stringOrNull("label") ?: nodeId
+                    val role = obj.stringOrNull("role")
+                    val filePath = obj.stringOrNull("file") ?: continue
+                    val line = obj.intOrNull("line") ?: continue
+                    val startColumn = obj.intOrNull("startColumn") ?: 1
+                    val uniqueKey = "$filePath:$line:$startColumn"
+                    if (!seen.add(uniqueKey)) continue
 
-                val enriched = buildNodeMethod(nodeId, label, role, filePath, line, startColumn) ?: continue
-                add(enriched)
+                    val enriched = buildNodeMethod(nodeId, label, role, filePath, line, startColumn) ?: continue
+                    add(enriched)
+                    added += 1
+                }
             }
-        }
+        return NodeMethodsResult(methods = nodeMethods, truncated = truncated)
     }
+
+    private data class NodeMethodsResult(
+        val methods: JsonArray,
+        val truncated: Boolean,
+    )
 
     private fun buildNodeMethod(
         nodeId: String,
@@ -258,7 +295,7 @@ class SecruxPsiUastEnrichmentService(
 
         val offset = offsetForLineColumn(document, line = line, column = startColumn)
         val method = findEnclosingMethod(psiFile, offset) ?: return null
-        val methodSummary = buildMethodSummary(method, document) ?: return null
+        val methodSummary = buildMethodSummary(method, document, highlightLine = line) ?: return null
         val invocations = collectInvocations(method, document)
         val conditions = collectConditions(method, document)
 
@@ -300,9 +337,26 @@ class SecruxPsiUastEnrichmentService(
     }
 
     private fun findEnclosingMethod(
-        psiFile: com.intellij.psi.PsiFile,
+        psiFile: PsiFile,
         offset: Int
     ): UMethod? {
+        val fileLen = psiFile.textLength
+        if (fileLen <= 0) return null
+        val safeOffset = offset.coerceIn(0, fileLen - 1)
+        val anchor = psiFile.findElementAt(safeOffset)
+
+        if (anchor != null) {
+            PsiTreeUtil.getParentOfType(anchor, PsiMethod::class.java, false)
+                ?.toUElementOfType<UMethod>()
+                ?.let { return it }
+            PsiTreeUtil.getParentOfType(anchor, KtNamedFunction::class.java, false)
+                ?.toUElementOfType<UMethod>()
+                ?.let { return it }
+            PsiTreeUtil.getParentOfType(anchor, KtPropertyAccessor::class.java, false)
+                ?.toUElementOfType<UMethod>()
+                ?.let { return it }
+        }
+
         val uFile = psiFile.toUElementOfType<UFile>() ?: return null
         var best: UMethod? = null
         var bestLen = Int.MAX_VALUE
@@ -327,12 +381,13 @@ class SecruxPsiUastEnrichmentService(
 
     private fun buildMethodSummary(
         method: UMethod,
-        document: com.intellij.openapi.editor.Document
+        document: Document,
+        highlightLine: Int?,
     ): JsonObject? {
         val sourcePsi = method.sourcePsi ?: return null
         val range = sourcePsi.textRange ?: return null
-        val startLine = document.getLineNumber(range.startOffset) + 1
-        val endLine = document.getLineNumber((range.endOffset - 1).coerceAtLeast(range.startOffset)) + 1
+        val fullStartLine = document.getLineNumber(range.startOffset) + 1
+        val fullEndLine = document.getLineNumber((range.endOffset - 1).coerceAtLeast(range.startOffset)) + 1
         val classFqn =
             method.javaPsi.containingClass?.qualifiedName
                 ?: containingUClass(method)?.qualifiedName
@@ -345,35 +400,48 @@ class SecruxPsiUastEnrichmentService(
             }
         val language = sourcePsi.language.id
 
+        val safeHighlight = highlightLine?.coerceIn(fullStartLine, fullEndLine)
+        val (excerptStartLine, excerptEndLine) = computeExcerptLines(fullStartLine, fullEndLine, safeHighlight)
+        val excerpt = buildTextExcerpt(document, excerptStartLine, excerptEndLine)
+        val truncated =
+            excerpt.truncated || excerptStartLine != fullStartLine || excerptEndLine != fullEndLine
+
         return buildJsonObject {
             put("name", method.name)
             put("signature", signature)
-            put("startLine", startLine)
-            put("endLine", endLine)
+            put("startLine", excerptStartLine)
+            put("endLine", excerptEndLine)
+            put("fullStartLine", fullStartLine)
+            put("fullEndLine", fullEndLine)
             put("language", language)
-            put("text", sourcePsi.text)
-            put("truncated", false)
+            put("text", excerpt.text)
+            put("truncated", truncated)
         }
     }
 
     private fun collectInvocations(
         method: UMethod,
-        document: com.intellij.openapi.editor.Document
+        document: Document
     ): JsonArray {
         val calls = mutableListOf<JsonObject>()
         method.accept(
             object : AbstractUastVisitor() {
                 override fun visitCallExpression(node: UCallExpression): Boolean {
+                    if (calls.size >= MAX_INVOCATIONS) return true
                     val sourcePsi = node.sourcePsi ?: return false
                     val range = sourcePsi.textRange ?: return false
                     val line = document.getLineNumber(range.startOffset) + 1
-                    val text = sourcePsi.text.trim()
+                    val text = sourcePsi.text.trim().take(MAX_CALL_TEXT_CHARS)
                     val argIds =
                         node.valueArguments
                             .asSequence()
+                            .take(MAX_CALL_ARG_IDENTIFIERS)
                             .mapNotNull { arg ->
                                 val psi = arg.sourcePsi
-                                psi?.text?.trim()?.takeIf { it.isNotEmpty() }
+                                psi?.text
+                                    ?.trim()
+                                    ?.take(MAX_METHOD_LINE_CHARS)
+                                    ?.takeIf { it.isNotEmpty() }
                             }
                             .toList()
                     calls.add(
@@ -396,7 +464,7 @@ class SecruxPsiUastEnrichmentService(
 
     private fun collectConditions(
         method: UMethod,
-        document: com.intellij.openapi.editor.Document
+        document: Document
     ): JsonArray {
         val conditions = mutableListOf<JsonObject>()
         method.accept(
@@ -420,19 +488,86 @@ class SecruxPsiUastEnrichmentService(
                 }
 
                 private fun addCondition(text: String?, startOffset: Int?) {
+                    if (conditions.size >= MAX_CONDITIONS) return
                     val safeText = text?.trim()?.takeIf { it.isNotEmpty() } ?: return
                     val offset = startOffset ?: return
                     val line = document.getLineNumber(offset) + 1
                     conditions.add(
                         buildJsonObject {
                             put("line", line)
-                            put("text", safeText)
+                            put("text", safeText.take(MAX_CONDITION_TEXT_CHARS))
                         }
                     )
                 }
             }
         )
         return JsonArray(conditions)
+    }
+
+    private fun computeExcerptLines(
+        fullStartLine: Int,
+        fullEndLine: Int,
+        highlightLine: Int?,
+    ): Pair<Int, Int> {
+        val total = (fullEndLine - fullStartLine + 1).coerceAtLeast(1)
+        if (total <= MAX_METHOD_EXCERPT_LINES) return fullStartLine to fullEndLine
+
+        val half = MAX_METHOD_EXCERPT_LINES / 2
+        val center = highlightLine ?: (fullStartLine + half)
+        var start = center - half
+        var end = start + MAX_METHOD_EXCERPT_LINES - 1
+
+        if (start < fullStartLine) {
+            start = fullStartLine
+            end = start + MAX_METHOD_EXCERPT_LINES - 1
+        }
+        if (end > fullEndLine) {
+            end = fullEndLine
+            start = (end - MAX_METHOD_EXCERPT_LINES + 1).coerceAtLeast(fullStartLine)
+        }
+        return start to end
+    }
+
+    private data class TextExcerpt(
+        val text: String,
+        val truncated: Boolean,
+    )
+
+    private fun buildTextExcerpt(
+        document: Document,
+        startLine: Int,
+        endLine: Int,
+    ): TextExcerpt {
+        if (document.lineCount <= 0) return TextExcerpt(text = "", truncated = false)
+        val safeStart = startLine.coerceAtLeast(1)
+        val safeEnd = endLine.coerceAtLeast(safeStart)
+
+        val builder = StringBuilder()
+        var truncated = false
+        for (line in safeStart..safeEnd) {
+            val lineText = getLineText(document, line)
+            val clippedLine = lineText.take(MAX_METHOD_LINE_CHARS)
+            if (builder.length + clippedLine.length + 1 > MAX_METHOD_EXCERPT_CHARS) {
+                truncated = true
+                break
+            }
+            builder.append(clippedLine).append('\n')
+        }
+
+        val text =
+            builder
+                .toString()
+                .trimEnd()
+                .ifBlank { "" }
+        return TextExcerpt(text = text, truncated = truncated)
+    }
+
+    private fun getLineText(document: Document, line: Int): String {
+        if (line <= 0 || line > document.lineCount) return ""
+        val idx = line - 1
+        val start = document.getLineStartOffset(idx)
+        val end = document.getLineEndOffset(idx)
+        return document.charsSequence.subSequence(start, end).toString()
     }
 
     private fun JsonObject.stringOrNull(key: String): String? =

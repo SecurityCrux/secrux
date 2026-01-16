@@ -19,6 +19,8 @@ import com.securitycrux.secrux.intellij.i18n.SecruxBundle
 import com.securitycrux.secrux.intellij.i18n.SecruxI18nListener
 import com.securitycrux.secrux.intellij.settings.SecruxProjectSettings
 import com.securitycrux.secrux.intellij.settings.SecruxTokenStore
+import com.securitycrux.secrux.intellij.secrux.CreateSecruxProjectDialog
+import com.securitycrux.secrux.intellij.secrux.CreateSecruxRepositoryDialog
 import com.securitycrux.secrux.intellij.secrux.SecruxApiClient
 import com.securitycrux.secrux.intellij.util.GitCli
 import com.securitycrux.secrux.intellij.util.GitCommitSummary
@@ -63,8 +65,10 @@ class SecruxTasksToolWindowPanel(
     private val useSelectedButton = JButton()
 
     private val reloadProjectsButton = JButton()
+    private val newProjectButton = JButton()
     private val projectCombo = JComboBox<ProjectOption>()
     private val repoCombo = JComboBox<RepositoryOption>()
+    private val newRepoButton = JButton()
     private val nameField = JBTextField()
     private val reloadGitButton = JButton()
     private val branchCombo = JComboBox<BranchOption>()
@@ -78,6 +82,8 @@ class SecruxTasksToolWindowPanel(
     private var lastRepoMatchPromptedNormalizedRemote: String? = null
     private var isUpdatingProjectCombo = false
     private var isUpdatingBranchCombo = false
+    private var pendingSelectProjectId: String? = null
+    private var pendingSelectRepositoryId: String? = null
 
     private val tableModel = TaskTableModel()
     private val table = JBTable(tableModel).apply {
@@ -140,7 +146,11 @@ class SecruxTasksToolWindowPanel(
             lastRepoMatchPromptedNormalizedRemote = null
             reloadProjects()
         }
+        newProjectButton.addActionListener { createProject() }
         projectCombo.addActionListener { onProjectSelectionChanged() }
+
+        newRepoButton.isEnabled = false
+        newRepoButton.addActionListener { createRepository() }
 
         reloadGitButton.addActionListener { reloadGitInfo(resetSelection = true) }
         branchCombo.addActionListener { onBranchSelectionChanged() }
@@ -183,10 +193,16 @@ class SecruxTasksToolWindowPanel(
             JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
                 add(projectCombo)
                 add(reloadProjectsButton)
+                add(newProjectButton)
             },
         )
         createPanel.add(JBLabel(SecruxBundle.message("label.repositoryOptional")))
-        createPanel.add(repoCombo.apply { toolTipText = SecruxBundle.message("tooltip.repositoryOptional") })
+        createPanel.add(
+            JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
+                add(repoCombo.apply { toolTipText = SecruxBundle.message("tooltip.repositoryOptional") })
+                add(newRepoButton)
+            },
+        )
         createPanel.add(JBLabel(SecruxBundle.message("label.taskNameOptional")))
         createPanel.add(nameField)
         createPanel.add(JBLabel(SecruxBundle.message("label.branchOptional")))
@@ -241,8 +257,10 @@ class SecruxTasksToolWindowPanel(
         nextButton.text = SecruxBundle.message("action.nextPage")
         useSelectedButton.text = SecruxBundle.message("action.useSelectedTask")
         reloadProjectsButton.text = SecruxBundle.message("action.reloadProjects")
+        newProjectButton.text = SecruxBundle.message("action.newProject")
         reloadGitButton.text = SecruxBundle.message("action.reloadGit")
         createButton.text = SecruxBundle.message("action.createIdeTask")
+        newRepoButton.text = SecruxBundle.message("action.newRepository")
         setAsDefaultCheckbox.text = SecruxBundle.message("label.setAsDefaultTask")
         setAsDefaultCheckbox.isSelected = true
         tableModel.refreshColumns()
@@ -264,8 +282,10 @@ class SecruxTasksToolWindowPanel(
         if (selected == null) {
             repoCombo.model = DefaultComboBoxModel(arrayOf(RepositoryOption.Unset))
             repoCombo.isEnabled = false
+            newRepoButton.isEnabled = false
             return
         }
+        newRepoButton.isEnabled = true
         reloadRepositories(selected)
     }
 
@@ -490,14 +510,25 @@ class SecruxTasksToolWindowPanel(
         }
         projectCombo.model = model
 
-        val toSelect =
-            projects.firstOrNull { it.projectId == previousProjectId }
+        val preferredProjectId = pendingSelectProjectId?.trim()?.takeIf { it.isNotBlank() }
+        val preferredOption =
+            preferredProjectId
+                ?.let { id -> projects.firstOrNull { it.projectId == id } }
                 ?.let { ProjectOption.Item(it.projectId, it.name) }
+        if (preferredOption != null) {
+            pendingSelectProjectId = null
+        }
+
+        val toSelect =
+            preferredOption
+                ?: projects.firstOrNull { it.projectId == previousProjectId }
+                    ?.let { ProjectOption.Item(it.projectId, it.name) }
                 ?: if (projects.size == 1) ProjectOption.Item(projects.first().projectId, projects.first().name) else ProjectOption.Select
 
         projectCombo.selectedItem = toSelect
         repoCombo.model = DefaultComboBoxModel(arrayOf(RepositoryOption.Unset))
         repoCombo.isEnabled = false
+        newRepoButton.isEnabled = toSelect is ProjectOption.Item
         isUpdatingProjectCombo = false
         onProjectSelectionChanged()
     }
@@ -521,10 +552,20 @@ class SecruxTasksToolWindowPanel(
         repoCombo.model = model
         repoCombo.isEnabled = true
 
+        val preferredRepoId = pendingSelectRepositoryId?.trim()?.takeIf { it.isNotBlank() }
+        val preferredOption =
+            preferredRepoId
+                ?.let { id -> repositories.firstOrNull { it.repoId == id } }
+                ?.let { RepositoryOption.Item(it.repoId, it.remoteUrl) }
+        if (preferredOption != null) {
+            pendingSelectRepositoryId = null
+        }
+
         val selectedRepo =
-            previousRepoId?.let { repoId ->
-                repositories.firstOrNull { it.repoId == repoId }?.let { RepositoryOption.Item(it.repoId, it.remoteUrl) }
-            } ?: RepositoryOption.Unset
+            preferredOption
+                ?: previousRepoId?.let { repoId ->
+                    repositories.firstOrNull { it.repoId == repoId }?.let { RepositoryOption.Item(it.repoId, it.remoteUrl) }
+                } ?: RepositoryOption.Unset
         repoCombo.selectedItem = selectedRepo
 
         maybePromptUseMatchedRepository(
@@ -668,6 +709,152 @@ class SecruxTasksToolWindowPanel(
                     val message = error.message ?: error.javaClass.simpleName
                     ApplicationManager.getApplication().invokeLater {
                         createStatusLabel.text = SecruxBundle.message("error.createIdeTaskFailed", message)
+                    }
+                }
+            },
+        )
+    }
+
+    private fun createProject() {
+        val baseUrl = settings.state.baseUrl.trim()
+        if (baseUrl.isBlank()) {
+            createStatusLabel.text = SecruxBundle.message("error.baseUrlRequired")
+            return
+        }
+
+        val initialName =
+            GitRemoteResolver.resolvePrimaryRemote(project)
+                ?.normalizedUrl
+                ?.substringAfterLast('/')
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: project.name
+
+        val dialog = CreateSecruxProjectDialog(project, initialProjectName = initialName)
+        if (!dialog.showAndGet()) return
+
+        val request =
+            buildJsonObject {
+                put("name", dialog.projectName)
+                put("codeOwners", JsonArray(dialog.codeOwners.map { JsonPrimitive(it) }))
+            }
+
+        ProgressManager.getInstance().run(
+            object : Task.Backgroundable(project, SecruxBundle.message("task.creatingProject"), true) {
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.isIndeterminate = true
+                    val token = SecruxTokenStore.getToken(project)
+                    if (token.isNullOrBlank()) {
+                        ApplicationManager.getApplication().invokeLater {
+                            createStatusLabel.text = SecruxBundle.message("error.tokenNotSet")
+                        }
+                        return
+                    }
+
+                    val client = SecruxApiClient(baseUrl = baseUrl, token = token)
+                    val response = client.createProject(request.toString())
+                    val created = parseCreatedProject(response)
+                    ApplicationManager.getApplication().invokeLater {
+                        pendingSelectProjectId = created.projectId
+                        createStatusLabel.text = SecruxBundle.message("message.projectCreated", created.name)
+                        reloadProjects()
+                    }
+                }
+
+                override fun onThrowable(error: Throwable) {
+                    val message = error.message ?: error.javaClass.simpleName
+                    ApplicationManager.getApplication().invokeLater {
+                        createStatusLabel.text = SecruxBundle.message("error.createProjectFailed", message)
+                    }
+                }
+            },
+        )
+    }
+
+    private fun createRepository() {
+        val baseUrl = settings.state.baseUrl.trim()
+        if (baseUrl.isBlank()) {
+            createStatusLabel.text = SecruxBundle.message("error.baseUrlRequired")
+            return
+        }
+
+        val selectedProject = projectCombo.selectedItem as? ProjectOption.Item
+        if (selectedProject == null) {
+            createStatusLabel.text = SecruxBundle.message("error.projectRequired")
+            return
+        }
+
+        val initialRemoteUrl = GitRemoteResolver.resolvePrimaryRemote(project)?.rawUrl
+        val initialBranch = (branchCombo.selectedItem as? BranchOption.Item)?.name
+
+        val dialog =
+            CreateSecruxRepositoryDialog(
+                project = project,
+                initialRemoteUrl = initialRemoteUrl,
+                initialDefaultBranch = initialBranch,
+                initialScmType = "GIT",
+            )
+        if (!dialog.showAndGet()) return
+
+        val request =
+            buildJsonObject {
+                put("sourceMode", "REMOTE")
+                put("remoteUrl", dialog.remoteUrl)
+                dialog.defaultBranch?.let { put("defaultBranch", it) }
+                dialog.scmType?.let { put("scmType", it) }
+                when (dialog.gitAuthMode) {
+                    CreateSecruxRepositoryDialog.GitAuthModeOption.NONE -> Unit
+
+                    CreateSecruxRepositoryDialog.GitAuthModeOption.BASIC -> {
+                        put(
+                            "gitAuth",
+                            buildJsonObject {
+                                put("mode", dialog.gitAuthMode.apiValue)
+                                dialog.gitUsername?.let { put("username", it) }
+                                dialog.gitPassword?.let { put("password", it) }
+                            },
+                        )
+                    }
+
+                    CreateSecruxRepositoryDialog.GitAuthModeOption.TOKEN -> {
+                        put(
+                            "gitAuth",
+                            buildJsonObject {
+                                put("mode", dialog.gitAuthMode.apiValue)
+                                dialog.gitUsername?.let { put("username", it) }
+                                dialog.gitToken?.let { put("token", it) }
+                            },
+                        )
+                    }
+                }
+            }
+
+        ProgressManager.getInstance().run(
+            object : Task.Backgroundable(project, SecruxBundle.message("task.creatingRepository"), true) {
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.isIndeterminate = true
+                    val token = SecruxTokenStore.getToken(project)
+                    if (token.isNullOrBlank()) {
+                        ApplicationManager.getApplication().invokeLater {
+                            createStatusLabel.text = SecruxBundle.message("error.tokenNotSet")
+                        }
+                        return
+                    }
+
+                    val client = SecruxApiClient(baseUrl = baseUrl, token = token)
+                    val response = client.createRepository(selectedProject.projectId, request.toString())
+                    val created = parseCreatedRepository(response)
+                    ApplicationManager.getApplication().invokeLater {
+                        pendingSelectRepositoryId = created.repoId
+                        createStatusLabel.text = SecruxBundle.message("message.repositoryCreated", created.remoteUrl ?: created.repoId)
+                        reloadRepositories(selectedProject)
+                    }
+                }
+
+                override fun onThrowable(error: Throwable) {
+                    val message = error.message ?: error.javaClass.simpleName
+                    ApplicationManager.getApplication().invokeLater {
+                        createStatusLabel.text = SecruxBundle.message("error.createRepositoryFailed", message)
                     }
                 }
             },
@@ -903,6 +1090,22 @@ class SecruxTasksToolWindowPanel(
         }
     }
 
+    private fun parseCreatedProject(body: String): ProjectRow {
+        val json = Json { ignoreUnknownKeys = true }
+        val root = json.parseToJsonElement(body).jsonObject
+
+        val success = root.booleanOrNull("success") ?: true
+        if (!success) {
+            val message = root.stringOrNull("message") ?: "unknown error"
+            throw IllegalStateException(message)
+        }
+
+        val obj = root["data"]?.jsonObject ?: throw IllegalStateException("missing project data")
+        val projectId = obj.stringOrNull("projectId") ?: throw IllegalStateException("missing projectId")
+        val name = obj.stringOrNull("name") ?: projectId
+        return ProjectRow(projectId = projectId, name = name)
+    }
+
     private fun parseRepositoryList(body: String): List<RepositoryRow> {
         val json = Json { ignoreUnknownKeys = true }
         val root = json.parseToJsonElement(body).jsonObject
@@ -919,6 +1122,21 @@ class SecruxTasksToolWindowPanel(
             val repoId = obj.stringOrNull("repoId") ?: return@mapNotNull null
             RepositoryRow(repoId = repoId, remoteUrl = obj.stringOrNull("remoteUrl"))
         }
+    }
+
+    private fun parseCreatedRepository(body: String): RepositoryRow {
+        val json = Json { ignoreUnknownKeys = true }
+        val root = json.parseToJsonElement(body).jsonObject
+
+        val success = root.booleanOrNull("success") ?: true
+        if (!success) {
+            val message = root.stringOrNull("message") ?: "unknown error"
+            throw IllegalStateException(message)
+        }
+
+        val obj = root["data"]?.jsonObject ?: throw IllegalStateException("missing repository data")
+        val repoId = obj.stringOrNull("repoId") ?: throw IllegalStateException("missing repoId")
+        return RepositoryRow(repoId = repoId, remoteUrl = obj.stringOrNull("remoteUrl"))
     }
 
     private fun JsonObject.stringOrNull(key: String): String? =

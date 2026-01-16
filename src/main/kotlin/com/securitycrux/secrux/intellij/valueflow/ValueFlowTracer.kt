@@ -4,17 +4,21 @@ import com.securitycrux.secrux.intellij.callgraph.CallEdge
 import com.securitycrux.secrux.intellij.callgraph.CallGraph
 import com.securitycrux.secrux.intellij.callgraph.MethodRef
 import com.securitycrux.secrux.intellij.callgraph.TypeHierarchyIndex
+import com.securitycrux.secrux.intellij.callgraph.callSiteOffsets
 import java.util.ArrayDeque
 
 enum class ValueFlowEdgeKind {
     ALIAS,
+    COPY,
     LOAD,
     STORE,
     HEAP_STORE,
+    HEAP_LOAD,
     CALL_ARG,
     CALL_RECEIVER,
     CALL_RETURN,
     CALL_RESULT,
+    CALL_APPROX,
     INJECT,
 }
 
@@ -48,6 +52,7 @@ class ValueFlowTracer(
     private data class TraceState(
         val node: ValueFlowNode,
         val depth: Int,
+        val contextOffset: Int?,
     )
 
     private data class Parent(
@@ -55,12 +60,38 @@ class ValueFlowTracer(
         val via: ValueFlowEdge,
     )
 
+    private fun normalizeContextOffsetForToken(token: String, contextOffset: Int?): Int? {
+        val base = contextOffset ?: return null
+        val tokenOffset = tokenOffset(token) ?: return base
+        return maxOf(base, tokenOffset)
+    }
+
+    private fun tokenOffset(token: String): Int? {
+        val t = token.trim()
+        if (t.startsWith(CALL_RESULT_TOKEN_PREFIX)) {
+            return t.substringAfter(CALL_RESULT_TOKEN_PREFIX, missingDelimiterValue = "").toIntOrNull()
+        }
+        if (t.startsWith(ALLOC_TOKEN_PREFIX)) {
+            return t.substringAfterLast('@', missingDelimiterValue = "").toIntOrNull()
+        }
+        return null
+    }
+
     private data class StoreSite(
         val method: MethodRef,
         val targetField: String,
         val baseToken: String,
         val fieldSuffix: String,
         val value: String,
+        val offset: Int?,
+    )
+
+    private data class LoadSite(
+        val method: MethodRef,
+        val sourceField: String,
+        val baseToken: String,
+        val fieldSuffix: String,
+        val target: String,
         val offset: Int?,
     )
 
@@ -84,6 +115,27 @@ class ValueFlowTracer(
                             fieldSuffix = parsed.fieldSuffix,
                             value = store.value,
                             offset = store.offset,
+                        )
+                    )
+                }
+            }
+        }.mapValues { (_, v) -> v.toList() }
+
+    private val loadSitesByFieldSuffix: Map<String, List<LoadSite>> =
+        buildMap<String, MutableList<LoadSite>> {
+            for ((method, summary) in summaries.summaries) {
+                for (load in summary.loads) {
+                    val sourceField = load.sourceField.trim().takeIf { it.isNotBlank() } ?: continue
+                    val parsed = parseHeapFieldToken(sourceField) ?: continue
+                    val target = load.target.trim().takeIf { it.isNotBlank() } ?: continue
+                    getOrPut(parsed.fieldSuffix) { mutableListOf() }.add(
+                        LoadSite(
+                            method = method,
+                            sourceField = sourceField,
+                            baseToken = parsed.baseToken,
+                            fieldSuffix = parsed.fieldSuffix,
+                            target = target,
+                            offset = load.offset,
                         )
                     )
                 }
@@ -168,6 +220,7 @@ class ValueFlowTracer(
     fun traceToRoot(
         startMethod: MethodRef,
         startToken: String,
+        startOffset: Int? = null,
         maxDepth: Int = 10,
         maxStates: Int = 2_000,
         maxHeapWritersPerStep: Int = 25,
@@ -175,6 +228,7 @@ class ValueFlowTracer(
         traceToRoots(
             startMethod = startMethod,
             startToken = startToken,
+            startOffset = startOffset,
             maxDepth = maxDepth,
             maxStates = maxStates,
             maxHeapWritersPerStep = maxHeapWritersPerStep,
@@ -184,6 +238,7 @@ class ValueFlowTracer(
     fun traceToRoots(
         startMethod: MethodRef,
         startToken: String,
+        startOffset: Int? = null,
         maxDepth: Int = 10,
         maxStates: Int = 2_000,
         maxHeapWritersPerStep: Int = 25,
@@ -196,15 +251,21 @@ class ValueFlowTracer(
 
         val start = ValueFlowNode(method = startMethod, token = startToken)
         val queue = ArrayDeque<TraceState>()
-        val visited = linkedSetOf<ValueFlowNode>()
+        val visitedMaxOffset = hashMapOf<ValueFlowNode, Int>()
         val parents = hashMapOf<ValueFlowNode, Parent>()
 
-        fun enqueue(next: ValueFlowNode, depth: Int, via: ValueFlowEdge) {
+        fun offsetKey(offset: Int?): Int = offset ?: Int.MAX_VALUE
+
+        fun enqueue(next: ValueFlowNode, depth: Int, contextOffset: Int?, via: ValueFlowEdge) {
             if (next.token.isBlank()) return
-            if (visited.size >= maxStates) return
-            if (!visited.add(next)) return
+            if (visitedMaxOffset.size >= maxStates) return
+            val normalizedOffset = normalizeContextOffsetForToken(next.token, contextOffset)
+            val nextKey = offsetKey(normalizedOffset)
+            val existing = visitedMaxOffset[next]
+            if (existing != null && existing >= nextKey) return
+            visitedMaxOffset[next] = maxOf(existing ?: Int.MIN_VALUE, nextKey)
             parents[next] = Parent(prev = via.from, via = via)
-            queue.addLast(TraceState(node = next, depth = depth))
+            queue.addLast(TraceState(node = next, depth = depth, contextOffset = normalizedOffset))
         }
 
         fun isRoot(node: ValueFlowNode, depth: Int): Boolean {
@@ -231,13 +292,14 @@ class ValueFlowTracer(
             return listOf(ValueFlowTrace(start = start, end = start, edges = emptyList()))
         }
 
-        visited.add(start)
-        queue.addLast(TraceState(node = start, depth = 0))
+        val normalizedStartOffset = normalizeContextOffsetForToken(start.token, startOffset)
+        visitedMaxOffset[start] = offsetKey(normalizedStartOffset)
+        queue.addLast(TraceState(node = start, depth = 0, contextOffset = normalizedStartOffset))
 
         val candidates = linkedMapOf<ValueFlowNode, Pair<Int, Int>>()
 
         while (queue.isNotEmpty()) {
-            val (current, depth) = queue.removeFirst()
+            val (current, depth, currentOffset) = queue.removeFirst()
 
             if (current != start && isRoot(current, depth)) {
                 val key = rootPriority(current, depth) to depth
@@ -255,19 +317,30 @@ class ValueFlowTracer(
             val summary = summaries.summaries[current.method]
 
             if (summary != null) {
-                expandAliases(current, summary).forEach { edge -> enqueue(edge.to, depth + 1, edge) }
-                expandLoads(current, summary).forEach { edge -> enqueue(edge.to, depth + 1, edge) }
-                expandStores(current, summary).forEach { edge -> enqueue(edge.to, depth + 1, edge) }
-                expandCallResultsToCallee(current, summary).forEach { edge -> enqueue(edge.to, depth + 1, edge) }
+                expandCopiesBackward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandLoadsBackward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandStoresBackward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandCallResultsToCallee(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandCallResultApproxToInputs(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
             }
             expandInjectEdges(current).forEach { edge ->
-                enqueue(edge.to, depth + 1, edge)
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
             }
             expandCallToCaller(current).forEach { edge ->
-                enqueue(edge.to, depth + 1, edge)
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
             }
             expandHeapStores(current, maxHeapWritersPerStep).forEach { edge ->
-                enqueue(edge.to, depth + 1, edge)
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
             }
         }
 
@@ -280,6 +353,369 @@ class ValueFlowTracer(
                 val edges = reconstructEdges(start = start, end = end, parents = parents)
                 ValueFlowTrace(start = start, end = end, edges = edges)
             }
+    }
+
+    /**
+     * "Round-trip" value-flow: first do a backward trace (sink -> roots), then try to recover a readable
+     * forward chain by running a bounded forward propagation from the backward root back towards the sink.
+     *
+     * Output traces remain in the same format as [traceToRoots] (start=sink, end=root, edges are still in
+     * `target <= source` orientation) so existing UI/evidence code can keep working.
+     */
+    fun traceToRootsRoundTrip(
+        startMethod: MethodRef,
+        startToken: String,
+        startOffset: Int? = null,
+        maxDepth: Int = 10,
+        maxStates: Int = 2_000,
+        maxHeapWritersPerStep: Int = 25,
+        maxTraces: Int = 3,
+        forwardMaxDepth: Int = 16,
+        forwardMaxStates: Int = 4_000,
+        forwardMaxHeapReadersPerStep: Int = 25,
+    ): List<ValueFlowTrace> {
+        if (startToken.isBlank()) return emptyList()
+
+        val backwardTraces =
+            traceToRoots(
+                startMethod = startMethod,
+                startToken = startToken,
+                startOffset = startOffset,
+                maxDepth = maxDepth,
+                maxStates = maxStates,
+                maxHeapWritersPerStep = maxHeapWritersPerStep,
+                maxTraces = maxTraces,
+            )
+
+        val sink = ValueFlowNode(method = startMethod, token = startToken)
+        val safeForwardDepth = forwardMaxDepth.coerceIn(1, 50)
+        val safeForwardStates = forwardMaxStates.coerceIn(200, 50_000)
+        val safeForwardReaders = forwardMaxHeapReadersPerStep.coerceIn(1, 200)
+
+        fun invert(edge: ValueFlowEdge): ValueFlowEdge =
+            ValueFlowEdge(
+                kind = edge.kind,
+                from = edge.to,
+                to = edge.from,
+                offset = edge.offset,
+                filePath = edge.filePath,
+                details = edge.details,
+            )
+
+        fun tryForwardTaint(root: ValueFlowNode): ValueFlowTrace? {
+            val parents =
+                findForwardPath(
+                    start = root,
+                    target = sink,
+                    maxDepth = safeForwardDepth,
+                    maxStates = safeForwardStates,
+                    maxHeapReadersPerStep = safeForwardReaders,
+                ) ?: return null
+            val forwardEdges = reconstructEdges(start = root, end = sink, parents = parents)
+            val backwardEdges = forwardEdges.asReversed().map(::invert)
+            return ValueFlowTrace(start = sink, end = root, edges = backwardEdges)
+        }
+
+        if (backwardTraces.isNotEmpty()) {
+            return backwardTraces.map { trace ->
+                tryForwardTaint(trace.end) ?: trace
+            }
+        }
+
+        val entrypointTrace =
+            traceFromEntryPoints(
+                sink = sink,
+                maxDepth = safeForwardDepth,
+                maxStates = safeForwardStates,
+                maxHeapReadersPerStep = safeForwardReaders,
+            ) ?: return emptyList()
+
+        return listOf(entrypointTrace)
+    }
+
+    /**
+     * Inter-procedural value-flow tracing constrained to a single call chain (root -> ... -> sinkMethod).
+     *
+     * This is designed to *validate* whether a taint path can be established along a specific call chain,
+     * instead of exploring the whole project graph.
+     *
+     * Constraints:
+     * - Cross-method propagation is only allowed between adjacent methods on the chain.
+     * - Calls not on the chain are treated as "external/unmodeled" for `CALL_APPROX`, even if we have summaries,
+     *   so we can keep propagation inside the chain methods without jumping into unrelated callees.
+     * - Heap store/load hops are limited to methods on the chain.
+     *
+     * Returns traces that end at the chain root method only; empty means "not verified".
+     */
+    fun traceToChainRoot(
+        chainMethodsOrdered: List<MethodRef>,
+        startToken: String,
+        startOffset: Int? = null,
+        maxDepth: Int = 12,
+        maxStates: Int = 1_500,
+        maxHeapWritersPerStep: Int = 25,
+        maxTraces: Int = 1,
+    ): List<ValueFlowTrace> {
+        val methods = chainMethodsOrdered.distinct()
+        if (methods.isEmpty()) return emptyList()
+        if (startToken.isBlank()) return emptyList()
+
+        val rootMethod = methods.first()
+        val sinkMethod = methods.last()
+
+        val allowedMethods = methods.toSet()
+
+        val allowedCalleesByCaller = hashMapOf<MethodRef, Set<MethodRef>>()
+        val allowedCallersByCallee = hashMapOf<MethodRef, Set<MethodRef>>()
+        val allowedCallOffsets = hashMapOf<CallEdge, Set<Int>>()
+
+        for (i in 0 until methods.lastIndex) {
+            val caller = methods[i]
+            val callee = methods[i + 1]
+            allowedCalleesByCaller[caller] = setOf(callee)
+            allowedCallersByCallee[callee] = setOf(caller)
+            val edge = CallEdge(caller = caller, callee = callee)
+            allowedCallOffsets[edge] = graph.callSiteOffsets(edge)
+        }
+
+        val candidates =
+            traceToMethodInScope(
+                startMethod = sinkMethod,
+                startToken = startToken,
+                startOffset = startOffset,
+                targetMethod = rootMethod,
+                allowedMethods = allowedMethods,
+                allowedCallersByCallee = allowedCallersByCallee,
+                allowedCalleesByCaller = allowedCalleesByCaller,
+                allowedCallOffsets = allowedCallOffsets,
+                treatOutOfScopeCallsAsExternal = true,
+                maxDepth = maxDepth,
+                maxStates = maxStates,
+                maxHeapWritersPerStep = maxHeapWritersPerStep,
+                maxTraces = maxTraces,
+            )
+
+        return candidates.filter { it.end.method == rootMethod }
+    }
+
+    private fun traceToMethodInScope(
+        startMethod: MethodRef,
+        startToken: String,
+        startOffset: Int?,
+        targetMethod: MethodRef,
+        allowedMethods: Set<MethodRef>,
+        allowedCallersByCallee: Map<MethodRef, Set<MethodRef>>,
+        allowedCalleesByCaller: Map<MethodRef, Set<MethodRef>>,
+        allowedCallOffsets: Map<CallEdge, Set<Int>>,
+        treatOutOfScopeCallsAsExternal: Boolean,
+        maxDepth: Int,
+        maxStates: Int,
+        maxHeapWritersPerStep: Int,
+        maxTraces: Int,
+    ): List<ValueFlowTrace> {
+        if (startToken.isBlank()) return emptyList()
+        if (maxDepth <= 0 || maxStates <= 0) return emptyList()
+        if (maxTraces <= 0) return emptyList()
+
+        val safeMaxTraces = maxTraces.coerceIn(1, 20)
+
+        val start = ValueFlowNode(method = startMethod, token = startToken)
+        if (start.method !in allowedMethods) return emptyList()
+        if (targetMethod !in allowedMethods) return emptyList()
+
+        if (startMethod == targetMethod) {
+            return listOf(ValueFlowTrace(start = start, end = start, edges = emptyList()))
+        }
+
+        val queue = ArrayDeque<TraceState>()
+        val visitedMaxOffset = hashMapOf<ValueFlowNode, Int>()
+        val parents = hashMapOf<ValueFlowNode, Parent>()
+        val hits = mutableListOf<ValueFlowNode>()
+
+        fun offsetKey(offset: Int?): Int = offset ?: Int.MAX_VALUE
+
+        fun isAllowedOffset(edge: CallEdge, offset: Int?): Boolean {
+            val allowed = allowedCallOffsets[edge].orEmpty()
+            if (allowed.isEmpty()) return true
+            val off = offset ?: return true
+            return off in allowed
+        }
+
+        fun enqueue(next: ValueFlowNode, depth: Int, contextOffset: Int?, via: ValueFlowEdge) {
+            if (next.token.isBlank()) return
+            if (next.method !in allowedMethods) return
+            if (visitedMaxOffset.size >= maxStates) return
+            val normalizedOffset = normalizeContextOffsetForToken(next.token, contextOffset)
+            val nextKey = offsetKey(normalizedOffset)
+            val existing = visitedMaxOffset[next]
+            if (existing != null && existing >= nextKey) return
+            visitedMaxOffset[next] = maxOf(existing ?: Int.MIN_VALUE, nextKey)
+            parents[next] = Parent(prev = via.from, via = via)
+            queue.addLast(TraceState(node = next, depth = depth, contextOffset = normalizedOffset))
+        }
+
+        fun filterEdges(edges: List<ValueFlowEdge>): List<ValueFlowEdge> {
+            if (edges.isEmpty()) return edges
+            return edges.filter { it.to.method in allowedMethods }
+        }
+
+        fun expandCallToCallerScoped(node: ValueFlowNode): List<ValueFlowEdge> {
+            val raw = expandCallToCaller(node)
+            if (raw.isEmpty()) return raw
+            return raw.filter { edge ->
+                val caller = edge.to.method
+                val callee = edge.from.method
+                if (caller !in allowedMethods) return@filter false
+                if (callee !in allowedMethods) return@filter false
+                val allowedCallers = allowedCallersByCallee[callee].orEmpty()
+                if (caller !in allowedCallers) return@filter false
+                val callEdge = CallEdge(caller = caller, callee = callee)
+                isAllowedOffset(callEdge, edge.offset)
+            }
+        }
+
+        fun expandCallResultsToCalleeScoped(node: ValueFlowNode, summary: MethodSummary, contextOffset: Int?): List<ValueFlowEdge> {
+            val raw = expandCallResultsToCallee(node, summary, contextOffset)
+            if (raw.isEmpty()) return raw
+            return raw.filter { edge ->
+                val from = edge.from.method
+                val to = edge.to.method
+                if (from !in allowedMethods) return@filter false
+                if (to !in allowedMethods) return@filter false
+                if (from == to) return@filter true
+                val allowedCallees = allowedCalleesByCaller[from].orEmpty()
+                if (to !in allowedCallees) return@filter false
+                val callEdge = CallEdge(caller = from, callee = to)
+                isAllowedOffset(callEdge, edge.offset)
+            }
+        }
+
+        fun expandCallResultApproxToInputsScoped(node: ValueFlowNode, summary: MethodSummary, contextOffset: Int?): List<ValueFlowEdge> {
+            val token = node.token.trim()
+            if (token.isBlank() || isUnknownToken(token)) return emptyList()
+
+            fun isExternalOrUnmodeledForScope(call: CallSiteSummary): Boolean {
+                if (!treatOutOfScopeCallsAsExternal) return false
+                val targets = possibleCallTargets(caller = node.method, declaredCalleeId = call.calleeId, callOffset = call.callOffset)
+                if (targets.isEmpty()) return true
+
+                val allowedCallees = allowedCalleesByCaller[node.method].orEmpty()
+                if (allowedCallees.isEmpty()) return true
+                if (targets.none { it in allowedCallees }) return true
+
+                val inScope = targets.filter { it in allowedMethods }
+                if (inScope.isEmpty()) return true
+                return inScope.none { summaries.summaries.containsKey(it) }
+            }
+
+            val calls =
+                when {
+                    token.startsWith(CALL_RESULT_TOKEN_PREFIX) -> {
+                        val callOffset = token.substringAfter(CALL_RESULT_TOKEN_PREFIX, missingDelimiterValue = "").toIntOrNull()
+                        if (callOffset != null) {
+                            summary.calls.filter { it.callOffset == callOffset }
+                        } else {
+                            emptyList()
+                        }
+                    }
+
+                    else -> summary.calls.filter { it.result?.trim() == token }
+                }
+
+            if (calls.isEmpty()) return emptyList()
+
+            val out = mutableListOf<ValueFlowEdge>()
+            val seen = hashSetOf<String>()
+
+            fun addEdge(toToken: String, callOffset: Int?, details: String) {
+                if (toToken.isBlank() || isUnknownToken(toToken)) return
+                if (toToken == token) return
+                val key = "${callOffset ?: -1}:$toToken:$details"
+                if (!seen.add(key)) return
+                out.add(
+                    ValueFlowEdge(
+                        kind = ValueFlowEdgeKind.CALL_APPROX,
+                        from = node,
+                        to = ValueFlowNode(method = node.method, token = toToken),
+                        offset = callOffset,
+                        details = details,
+                    )
+                )
+            }
+
+            for (call in calls) {
+                val callOffset = call.callOffset
+                if (contextOffset != null && callOffset != null && callOffset > contextOffset) continue
+                if (!isExternalOrUnmodeledForScope(call)) continue
+
+                val callee = call.calleeId ?: "UNKNOWN_CALLEE"
+                addEdge(
+                    toToken = call.receiver?.trim().orEmpty(),
+                    callOffset = callOffset,
+                    details = "external-call $callee receiver -> result",
+                )
+                for ((idx, arg) in call.args.withIndex()) {
+                    addEdge(
+                        toToken = arg.trim(),
+                        callOffset = callOffset,
+                        details = "external-call $callee argIndex=$idx -> result",
+                    )
+                }
+            }
+
+            return out
+        }
+
+        val normalizedStartOffset = normalizeContextOffsetForToken(start.token, startOffset)
+        visitedMaxOffset[start] = offsetKey(normalizedStartOffset)
+        queue.addLast(TraceState(node = start, depth = 0, contextOffset = normalizedStartOffset))
+
+        while (queue.isNotEmpty()) {
+            val (current, depth, currentOffset) = queue.removeFirst()
+
+            if (current != start && current.method == targetMethod) {
+                hits.add(current)
+                if (hits.size >= safeMaxTraces) break
+            }
+
+            if (depth >= maxDepth) continue
+
+            val summary = summaries.summaries[current.method]
+            if (summary != null) {
+                filterEdges(expandCopiesBackward(current, summary, currentOffset)).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                filterEdges(expandLoadsBackward(current, summary, currentOffset)).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                filterEdges(expandStoresBackward(current, summary, currentOffset)).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                filterEdges(expandCallResultsToCalleeScoped(current, summary, currentOffset)).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                filterEdges(expandCallResultApproxToInputsScoped(current, summary, currentOffset)).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+            }
+
+            filterEdges(expandInjectEdges(current)).forEach { edge ->
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+            }
+            filterEdges(expandCallToCallerScoped(current)).forEach { edge ->
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+            }
+            filterEdges(expandHeapStores(current, maxHeapWritersPerStep)).forEach { edge ->
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+            }
+        }
+
+        if (hits.isEmpty()) return emptyList()
+
+        return hits.map { end ->
+            val edges = reconstructEdges(start = start, end = end, parents = parents)
+            ValueFlowTrace(start = start, end = end, edges = edges)
+        }
     }
 
     private data class ParsedHeapFieldToken(
@@ -331,6 +767,11 @@ class ValueFlowTracer(
             base == "STATIC" -> "STATIC:$suffix"
             else -> "HEAP($base):$suffix"
         }
+    }
+
+    private fun ownerTypeFromFieldSuffix(fieldSuffix: String): String? {
+        val owner = fieldSuffix.substringBefore('#', missingDelimiterValue = "").trim()
+        return owner.takeIf { it.isNotBlank() }
     }
 
     private data class CandidateTypes(
@@ -456,74 +897,157 @@ class ValueFlowTracer(
         }
     }
 
-    private fun expandAliases(node: ValueFlowNode, summary: MethodSummary): List<ValueFlowEdge> {
-        val out = mutableListOf<ValueFlowEdge>()
+    private fun expandHeapBaseAliases(node: ValueFlowNode, summary: MethodSummary): List<ValueFlowEdge> {
         val token = node.token
+        val heap = parseHeapFieldToken(token) ?: return emptyList()
 
-        val heap = parseHeapFieldToken(token)
-        if (heap != null) {
-            for (alias in summary.aliases) {
-                val otherBase =
-                    when {
-                        alias.left == heap.baseToken -> alias.right
-                        alias.right == heap.baseToken -> alias.left
-                        else -> null
-                    } ?: continue
-                if (otherBase == "UNKNOWN") continue
-                out.add(
-                    ValueFlowEdge(
-                        kind = ValueFlowEdgeKind.ALIAS,
-                        from = node,
-                        to = ValueFlowNode(method = node.method, token = buildHeapFieldToken(otherBase, heap.fieldSuffix)),
-                        offset = alias.offset,
-                        details = "heapBase ${heap.baseToken} <-> $otherBase",
-                    )
-                )
-            }
-        }
-
-        for (alias in summary.aliases) {
-            val next =
+        val out = mutableListOf<ValueFlowEdge>()
+        for (copy in summary.aliases) {
+            val otherBase =
                 when {
-                    alias.left == token -> alias.right
-                    alias.right == token -> alias.left
+                    copy.left == heap.baseToken -> copy.right
+                    copy.right == heap.baseToken -> copy.left
                     else -> null
                 } ?: continue
+            if (otherBase == "UNKNOWN") continue
             out.add(
                 ValueFlowEdge(
                     kind = ValueFlowEdgeKind.ALIAS,
                     from = node,
-                    to = ValueFlowNode(method = node.method, token = next),
-                    offset = alias.offset,
+                    to = ValueFlowNode(method = node.method, token = buildHeapFieldToken(otherBase, heap.fieldSuffix)),
+                    offset = copy.offset,
+                    details = "heapBase ${heap.baseToken} <-> $otherBase",
                 )
             )
         }
         return out
     }
 
-    private fun expandLoads(node: ValueFlowNode, summary: MethodSummary): List<ValueFlowEdge> {
-        val out = mutableListOf<ValueFlowEdge>()
+    private fun expandCopiesBackward(
+        node: ValueFlowNode,
+        summary: MethodSummary,
+        contextOffset: Int?,
+        maxEdgesPerToken: Int = 3,
+    ): List<ValueFlowEdge> {
         val token = node.token
-        for (load in summary.loads) {
-            if (load.target != token) continue
-            out.add(
-                ValueFlowEdge(
-                    kind = ValueFlowEdgeKind.LOAD,
-                    from = node,
-                    to = ValueFlowNode(method = node.method, token = load.sourceField),
-                    offset = load.offset,
+        if (parseHeapFieldToken(token) != null) {
+            return expandHeapBaseAliases(node, summary)
+        }
+
+        fun withinOffset(edgeOffset: Int?): Boolean =
+            contextOffset == null || edgeOffset == null || edgeOffset <= contextOffset
+
+        val candidates =
+            summary.aliases
+                .asSequence()
+                .filter { it.left == token }
+                .filter { withinOffset(it.offset) }
+                .toList()
+
+        if (candidates.isEmpty()) return emptyList()
+
+        val safeMax = maxEdgesPerToken.coerceIn(1, 50)
+        val ordered =
+            candidates
+                .sortedWith(
+                    compareByDescending<AliasEdge> { it.offset ?: Int.MIN_VALUE }
+                        .thenBy { it.right }
                 )
+                .take(safeMax)
+
+        return ordered.map { copy ->
+            ValueFlowEdge(
+                kind = ValueFlowEdgeKind.COPY,
+                from = node,
+                to = ValueFlowNode(method = node.method, token = copy.right),
+                offset = copy.offset,
+                details = "copy ${copy.left} <= ${copy.right}",
             )
         }
-        return out
     }
 
-    private fun expandCallResultsToCallee(node: ValueFlowNode, summary: MethodSummary): List<ValueFlowEdge> {
+    private fun expandCopiesForward(
+        node: ValueFlowNode,
+        summary: MethodSummary,
+        contextOffset: Int?,
+        maxEdgesPerToken: Int = 6,
+    ): List<ValueFlowEdge> {
+        val token = node.token
+        if (parseHeapFieldToken(token) != null) {
+            return expandHeapBaseAliases(node, summary)
+        }
+
+        fun withinOffset(edgeOffset: Int?): Boolean =
+            contextOffset == null || edgeOffset == null || edgeOffset >= contextOffset
+
+        val candidates =
+            summary.aliases
+                .asSequence()
+                .filter { it.right == token }
+                .filter { withinOffset(it.offset) }
+                .toList()
+
+        if (candidates.isEmpty()) return emptyList()
+
+        val safeMax = maxEdgesPerToken.coerceIn(1, 200)
+        val ordered =
+            candidates
+                .sortedWith(
+                    compareBy<AliasEdge> { it.offset ?: Int.MAX_VALUE }
+                        .thenBy { it.left }
+                )
+                .take(safeMax)
+
+        return ordered.map { copy ->
+            ValueFlowEdge(
+                kind = ValueFlowEdgeKind.COPY,
+                from = node,
+                to = ValueFlowNode(method = node.method, token = copy.left),
+                offset = copy.offset,
+                details = "copy ${copy.left} <= ${copy.right}",
+            )
+        }
+    }
+
+    private fun expandLoadsBackward(
+        node: ValueFlowNode,
+        summary: MethodSummary,
+        contextOffset: Int?,
+        maxEdgesPerToken: Int = 3,
+    ): List<ValueFlowEdge> {
+        val token = node.token
+        val candidates =
+            summary.loads
+                .asSequence()
+                .filter { it.target == token }
+                .filter { contextOffset == null || it.offset == null || it.offset <= contextOffset }
+                .toList()
+
+        if (candidates.isEmpty()) return emptyList()
+
+        val safeMax = maxEdgesPerToken.coerceIn(1, 50)
+        val ordered =
+            candidates
+                .sortedWith(compareByDescending<FieldLoad> { it.offset ?: Int.MIN_VALUE })
+                .take(safeMax)
+
+        return ordered.map { load ->
+            ValueFlowEdge(
+                kind = ValueFlowEdgeKind.LOAD,
+                from = node,
+                to = ValueFlowNode(method = node.method, token = load.sourceField),
+                offset = load.offset,
+            )
+        }
+    }
+
+    private fun expandCallResultsToCallee(node: ValueFlowNode, summary: MethodSummary, contextOffset: Int?): List<ValueFlowEdge> {
         val token = node.token
         val out = mutableListOf<ValueFlowEdge>()
 
         fun addTargets(call: CallSiteSummary) {
             val callOffset = call.callOffset
+            if (contextOffset != null && callOffset != null && callOffset > contextOffset) return
             val declared = call.calleeId?.let(MethodRef::fromIdOrNull)
             if (declared != null && declared.name == "<init>") {
                 out.add(
@@ -540,7 +1064,9 @@ class ValueFlowTracer(
                 )
                 return
             }
-            val targets = possibleCallTargets(caller = node.method, declaredCalleeId = call.calleeId, callOffset = callOffset)
+            val targets =
+                possibleCallTargets(caller = node.method, declaredCalleeId = call.calleeId, callOffset = callOffset)
+                    .filter { summaries.summaries.containsKey(it) }
             for (target in targets) {
                 out.add(
                     ValueFlowEdge(
@@ -554,21 +1080,127 @@ class ValueFlowTracer(
             }
         }
 
-        if (token.startsWith(CALL_RESULT_TOKEN_PREFIX)) {
-            val callOffset = token.substringAfter(CALL_RESULT_TOKEN_PREFIX).toIntOrNull()
-            if (callOffset != null) {
-                for (call in summary.calls) {
-                    if (call.callOffset == callOffset) addTargets(call)
+        val calls =
+            when {
+                token.startsWith(CALL_RESULT_TOKEN_PREFIX) -> {
+                    val callOffset = token.substringAfter(CALL_RESULT_TOKEN_PREFIX).toIntOrNull()
+                    if (callOffset != null) {
+                        summary.calls.filter { it.callOffset == callOffset }
+                    } else {
+                        emptyList()
+                    }
                 }
-            }
-        }
 
-        for (call in summary.calls) {
-            if (call.result != token) continue
+                else -> summary.calls.filter { it.result?.trim() == token }
+            }
+
+        for (call in calls) {
             addTargets(call)
         }
 
         return out
+    }
+
+    private fun expandCallResultApproxToInputs(node: ValueFlowNode, summary: MethodSummary, contextOffset: Int?): List<ValueFlowEdge> {
+        val token = node.token.trim()
+        if (token.isBlank() || isUnknownToken(token)) return emptyList()
+
+        fun isExternalOrUnmodeled(call: CallSiteSummary): Boolean {
+            val targets = possibleCallTargets(caller = node.method, declaredCalleeId = call.calleeId, callOffset = call.callOffset)
+            if (targets.isEmpty()) return true
+            return targets.none { summaries.summaries.containsKey(it) }
+        }
+
+        val calls =
+            when {
+                token.startsWith(CALL_RESULT_TOKEN_PREFIX) -> {
+                    val callOffset = token.substringAfter(CALL_RESULT_TOKEN_PREFIX, missingDelimiterValue = "").toIntOrNull()
+                    if (callOffset != null) {
+                        summary.calls.filter { it.callOffset == callOffset }
+                    } else {
+                        emptyList()
+                    }
+                }
+
+                else -> summary.calls.filter { it.result?.trim() == token }
+            }
+
+        if (calls.isEmpty()) return emptyList()
+
+        val out = mutableListOf<ValueFlowEdge>()
+        val seen = hashSetOf<String>()
+
+        fun addEdge(toToken: String, callOffset: Int?, details: String) {
+            if (toToken.isBlank() || isUnknownToken(toToken)) return
+            if (toToken == token) return
+            val key = "${callOffset ?: -1}:$toToken:$details"
+            if (!seen.add(key)) return
+            out.add(
+                ValueFlowEdge(
+                    kind = ValueFlowEdgeKind.CALL_APPROX,
+                    from = node,
+                    to = ValueFlowNode(method = node.method, token = toToken),
+                    offset = callOffset,
+                    details = details,
+                )
+            )
+        }
+
+        for (call in calls) {
+            val callOffset = call.callOffset
+            if (contextOffset != null && callOffset != null && callOffset > contextOffset) continue
+            if (!isExternalOrUnmodeled(call)) continue
+            val callee = call.calleeId ?: "UNKNOWN_CALLEE"
+
+            call.receiver?.trim()?.let { recv ->
+                addEdge(
+                    toToken = recv,
+                    callOffset = callOffset,
+                    details = "external-call $callee receiver -> result",
+                )
+            }
+
+            for ((idx, arg) in call.args.withIndex()) {
+                addEdge(
+                    toToken = arg.trim(),
+                    callOffset = callOffset,
+                    details = "external-call $callee argIndex=$idx -> result",
+                )
+            }
+        }
+
+        return out
+    }
+
+    private fun expandAllocForward(node: ValueFlowNode, summary: MethodSummary, contextOffset: Int?): List<ValueFlowEdge> {
+        val token = node.token.trim()
+        if (!token.startsWith(ALLOC_TOKEN_PREFIX)) return emptyList()
+
+        val suffix = token.removePrefix(ALLOC_TOKEN_PREFIX)
+        val allocOffset = suffix.substringAfterLast('@', missingDelimiterValue = "").toIntOrNull() ?: return emptyList()
+        if (contextOffset != null && allocOffset < contextOffset) return emptyList()
+        val callResultToken = "$CALL_RESULT_TOKEN_PREFIX$allocOffset"
+
+        val outputs =
+            buildList {
+                add(callResultToken)
+                for (call in summary.calls) {
+                    if (call.callOffset != allocOffset) continue
+                    call.result?.trim()?.takeIf { it.isNotBlank() && it != "UNKNOWN" }?.let { add(it) }
+                }
+            }.distinct()
+
+        if (outputs.isEmpty()) return emptyList()
+
+        return outputs.map { outToken ->
+            ValueFlowEdge(
+                kind = ValueFlowEdgeKind.CALL_RESULT,
+                from = node,
+                to = ValueFlowNode(method = node.method, token = outToken),
+                offset = allocOffset,
+                details = "alloc -> $outToken",
+            )
+        }
     }
 
     private fun possibleCallTargets(
@@ -594,16 +1226,51 @@ class ValueFlowTracer(
         return out.toList()
     }
 
-    private fun expandStores(node: ValueFlowNode, summary: MethodSummary): List<ValueFlowEdge> {
-        val out = mutableListOf<ValueFlowEdge>()
+    private fun expandStoresBackward(
+        node: ValueFlowNode,
+        summary: MethodSummary,
+        contextOffset: Int?,
+        maxEdgesPerToken: Int = 3,
+    ): List<ValueFlowEdge> {
         val token = node.token
+        val candidates =
+            summary.stores
+                .asSequence()
+                .filter { it.targetField == token }
+                .filter { contextOffset == null || it.offset == null || it.offset <= contextOffset }
+                .toList()
+
+        if (candidates.isEmpty()) return emptyList()
+
+        val safeMax = maxEdgesPerToken.coerceIn(1, 50)
+        val ordered =
+            candidates
+                .sortedWith(compareByDescending<FieldStore> { it.offset ?: Int.MIN_VALUE })
+                .take(safeMax)
+
+        return ordered.map { store ->
+            ValueFlowEdge(
+                kind = ValueFlowEdgeKind.STORE,
+                from = node,
+                to = ValueFlowNode(method = node.method, token = store.value),
+                offset = store.offset,
+            )
+        }
+    }
+
+    private fun expandStoresForward(node: ValueFlowNode, summary: MethodSummary, contextOffset: Int?): List<ValueFlowEdge> {
+        val token = node.token
+        if (token.isBlank() || isUnknownToken(token)) return emptyList()
+        val out = mutableListOf<ValueFlowEdge>()
         for (store in summary.stores) {
-            if (store.targetField != token) continue
+            if (store.value != token) continue
+            if (contextOffset != null && store.offset != null && store.offset < contextOffset) continue
+            val target = store.targetField.trim().takeIf { it.isNotBlank() } ?: continue
             out.add(
                 ValueFlowEdge(
                     kind = ValueFlowEdgeKind.STORE,
                     from = node,
-                    to = ValueFlowNode(method = node.method, token = store.value),
+                    to = ValueFlowNode(method = node.method, token = target),
                     offset = store.offset,
                 )
             )
@@ -621,19 +1288,13 @@ class ValueFlowTracer(
         val safeMaxWriters = maxWriters.coerceIn(1, 200)
         val incomingCallers = graph.incoming[node.method].orEmpty()
 
-        fun ownerTypeFromFieldSuffix(fieldSuffix: String): String? {
-            val owner = fieldSuffix.substringBefore('#', missingDelimiterValue = "").trim()
-            return owner.takeIf { it.isNotBlank() }
-        }
-
         val expectedOwnerType = ownerTypeFromFieldSuffix(heap.fieldSuffix)
 
         val baseNode = ValueFlowNode(method = node.method, token = heap.baseToken)
         val basePointsTo = pointsToRoots(baseNode)
         val baseFilteredRoots =
             filterPointsToRootsByExpectedType(basePointsTo.roots, expectedOwnerType)
-        val baseIsUnknown =
-            basePointsTo.truncated || baseFilteredRoots.isEmpty() || baseFilteredRoots.any(::isUnknownToken)
+        val baseConcreteRoots = baseFilteredRoots.filterNot(::isUnknownToken).toSet()
 
         data class ScoredStore(
             val site: StoreSite,
@@ -661,13 +1322,25 @@ class ValueFlowTracer(
             val storePointsTo = pointsToRoots(storeBaseNode)
             val storeFilteredRoots =
                 filterPointsToRootsByExpectedType(storePointsTo.roots, expectedOwnerType)
-            val storeIsUnknown =
-                storePointsTo.truncated || storeFilteredRoots.isEmpty() || storeFilteredRoots.any(::isUnknownToken)
+            val storeConcreteRoots = storeFilteredRoots.filterNot(::isUnknownToken).toSet()
 
-            if (baseIsUnknown || storeIsUnknown) {
-                val bonus =
-                    (if (site.method in incomingCallers) 100 else 0) +
-                        (if (site.method.classFqn == node.method.classFqn) 10 else 0)
+            val bonus =
+                (if (site.method in incomingCallers) 100 else 0) +
+                    (if (site.method.classFqn == node.method.classFqn) 10 else 0)
+
+            val commonConcrete = baseConcreteRoots.intersect(storeConcreteRoots)
+            if (commonConcrete.isNotEmpty()) {
+                scored.add(
+                    ScoredStore(
+                        site = site,
+                        score = bonus + commonConcrete.size,
+                        reason = "points-to common=${commonConcrete.take(3)}",
+                    )
+                )
+                continue
+            }
+
+            if (basePointsTo.truncated || storePointsTo.truncated || baseConcreteRoots.isEmpty() || storeConcreteRoots.isEmpty()) {
                 scored.add(
                     ScoredStore(
                         site = site,
@@ -675,22 +1348,7 @@ class ValueFlowTracer(
                         reason = "points-to unknown",
                     )
                 )
-                continue
             }
-
-            val common = baseFilteredRoots.intersect(storeFilteredRoots)
-            if (common.isEmpty()) continue
-
-            val bonus =
-                (if (site.method in incomingCallers) 100 else 0) +
-                    (if (site.method.classFqn == node.method.classFqn) 10 else 0)
-            scored.add(
-                ScoredStore(
-                    site = site,
-                    score = bonus + common.size,
-                    reason = "points-to common=${common.take(3)}",
-                )
-            )
         }
 
         val prioritized =
@@ -725,6 +1383,124 @@ class ValueFlowTracer(
                             ValueFlowNode(
                                 method = node.method,
                                 token = "${UNKNOWN_TOKEN_PREFIX}HEAP_STORE_TRUNCATED:+$omittedTotal",
+                            ),
+                        offset = null,
+                        details = token,
+                    )
+                )
+            }
+        }
+    }
+
+    private fun expandHeapLoadsForward(node: ValueFlowNode, maxReaders: Int): List<ValueFlowEdge> {
+        val token = node.token
+        val heap = parseHeapFieldToken(token) ?: return emptyList()
+
+        val readers = loadSitesByFieldSuffix[heap.fieldSuffix].orEmpty()
+        if (readers.isEmpty()) return emptyList()
+
+        val safeMaxReaders = maxReaders.coerceIn(1, 200)
+        val outgoingCallees = graph.outgoing[node.method].orEmpty()
+        val incomingCallers = graph.incoming[node.method].orEmpty()
+
+        val expectedOwnerType = ownerTypeFromFieldSuffix(heap.fieldSuffix)
+
+        val baseNode = ValueFlowNode(method = node.method, token = heap.baseToken)
+        val basePointsTo = pointsToRoots(baseNode)
+        val baseFilteredRoots =
+            filterPointsToRootsByExpectedType(basePointsTo.roots, expectedOwnerType)
+        val baseConcreteRoots = baseFilteredRoots.filterNot(::isUnknownToken).toSet()
+
+        data class ScoredLoad(
+            val site: LoadSite,
+            val score: Int,
+            val reason: String?,
+        )
+
+        val orderedCandidates =
+            readers
+                .asSequence()
+                .filter { it.method != node.method }
+                .sortedWith(
+                    compareByDescending<LoadSite> { it.method in outgoingCallees }
+                        .thenByDescending { it.method in incomingCallers }
+                        .thenByDescending { it.method.classFqn == node.method.classFqn }
+                )
+                .toList()
+
+        val maxCandidatesToCheck = (safeMaxReaders * 25).coerceIn(safeMaxReaders, 2_000)
+        val candidatesToCheck = orderedCandidates.take(maxCandidatesToCheck)
+        val candidateOverflow = orderedCandidates.size > candidatesToCheck.size
+
+        val scored = mutableListOf<ScoredLoad>()
+        for (site in candidatesToCheck) {
+            val loadBaseNode = ValueFlowNode(method = site.method, token = site.baseToken)
+            val loadPointsTo = pointsToRoots(loadBaseNode)
+            val loadFilteredRoots =
+                filterPointsToRootsByExpectedType(loadPointsTo.roots, expectedOwnerType)
+            val loadConcreteRoots = loadFilteredRoots.filterNot(::isUnknownToken).toSet()
+
+            val bonus =
+                (if (site.method in outgoingCallees) 100 else 0) +
+                    (if (site.method in incomingCallers) 50 else 0) +
+                    (if (site.method.classFqn == node.method.classFqn) 10 else 0)
+
+            val commonConcrete = baseConcreteRoots.intersect(loadConcreteRoots)
+            if (commonConcrete.isNotEmpty()) {
+                scored.add(
+                    ScoredLoad(
+                        site = site,
+                        score = bonus + commonConcrete.size,
+                        reason = "points-to common=${commonConcrete.take(3)}",
+                    )
+                )
+                continue
+            }
+
+            if (basePointsTo.truncated || loadPointsTo.truncated || baseConcreteRoots.isEmpty() || loadConcreteRoots.isEmpty()) {
+                scored.add(
+                    ScoredLoad(
+                        site = site,
+                        score = bonus,
+                        reason = "points-to unknown",
+                    )
+                )
+            }
+        }
+
+        val prioritized =
+            scored
+                .sortedByDescending { it.score }
+                .take(safeMaxReaders)
+                .toList()
+
+        val droppedByBudget = (scored.size - prioritized.size).coerceAtLeast(0)
+        val omittedByCandidateCap = if (candidateOverflow) orderedCandidates.size - candidatesToCheck.size else 0
+        val omittedTotal = droppedByBudget + omittedByCandidateCap
+        val truncated = omittedTotal > 0
+
+        return buildList {
+            addAll(
+                prioritized.map { item ->
+                    ValueFlowEdge(
+                        kind = ValueFlowEdgeKind.HEAP_LOAD,
+                        from = node,
+                        to = ValueFlowNode(method = item.site.method, token = item.site.sourceField),
+                        offset = item.site.offset,
+                        filePath = graph.methods[item.site.method]?.file?.path,
+                        details = token + item.reason?.let { " ($it)" }.orEmpty(),
+                    )
+                }
+            )
+            if (truncated) {
+                add(
+                    ValueFlowEdge(
+                        kind = ValueFlowEdgeKind.HEAP_LOAD,
+                        from = node,
+                        to =
+                            ValueFlowNode(
+                                method = node.method,
+                                token = "${UNKNOWN_TOKEN_PREFIX}HEAP_LOAD_TRUNCATED:+$omittedTotal",
                             ),
                         offset = null,
                         details = token,
@@ -799,10 +1575,11 @@ class ValueFlowTracer(
 
             val summary = summaries.summaries[current.method]
             if (summary != null) {
-                expandAliases(current, summary).forEach { edge -> enqueue(edge.to, depth + 1) }
-                expandLoads(current, summary).forEach { edge -> enqueue(edge.to, depth + 1) }
-                expandStores(current, summary).forEach { edge -> enqueue(edge.to, depth + 1) }
-                expandCallResultsToCallee(current, summary).forEach { edge -> enqueue(edge.to, depth + 1) }
+                expandCopiesBackward(current, summary, contextOffset = null).forEach { edge -> enqueue(edge.to, depth + 1) }
+                expandLoadsBackward(current, summary, contextOffset = null).forEach { edge -> enqueue(edge.to, depth + 1) }
+                expandStoresBackward(current, summary, contextOffset = null).forEach { edge -> enqueue(edge.to, depth + 1) }
+                expandCallResultsToCallee(current, summary, contextOffset = null).forEach { edge -> enqueue(edge.to, depth + 1) }
+                expandCallResultApproxToInputs(current, summary, contextOffset = null).forEach { edge -> enqueue(edge.to, depth + 1) }
             }
 
             expandInjectEdges(current).forEach { edge -> enqueue(edge.to, depth + 1) }
@@ -987,6 +1764,506 @@ class ValueFlowTracer(
         }
 
         return out
+    }
+
+    private fun expandLoadsForward(node: ValueFlowNode, summary: MethodSummary, contextOffset: Int?): List<ValueFlowEdge> {
+        val token = node.token
+        if (token.isBlank() || isUnknownToken(token)) return emptyList()
+        val out = mutableListOf<ValueFlowEdge>()
+        for (load in summary.loads) {
+            if (load.sourceField != token) continue
+            if (contextOffset != null && load.offset != null && load.offset < contextOffset) continue
+            val target = load.target.trim().takeIf { it.isNotBlank() } ?: continue
+            out.add(
+                ValueFlowEdge(
+                    kind = ValueFlowEdgeKind.LOAD,
+                    from = node,
+                    to = ValueFlowNode(method = node.method, token = target),
+                    offset = load.offset,
+                )
+            )
+        }
+        return out
+    }
+
+    private fun expandCallFromCaller(
+        node: ValueFlowNode,
+        summary: MethodSummary,
+        contextOffset: Int?,
+        maxTargetsPerCall: Int = 50,
+    ): List<ValueFlowEdge> {
+        val token = node.token
+        if (token.isBlank() || isUnknownToken(token)) return emptyList()
+
+        val out = mutableListOf<ValueFlowEdge>()
+        val safeMaxTargets = maxTargetsPerCall.coerceIn(1, 200)
+
+        for (call in summary.calls) {
+            val callOffset = call.callOffset
+            if (contextOffset != null && callOffset != null && callOffset < contextOffset) continue
+            val targets =
+                possibleCallTargets(
+                    caller = node.method,
+                    declaredCalleeId = call.calleeId,
+                    callOffset = callOffset,
+                    maxTargets = safeMaxTargets,
+                )
+                    .filter { summaries.summaries.containsKey(it) }
+
+            if (targets.isEmpty()) continue
+
+            if (call.receiver == token) {
+                for (callee in targets) {
+                    out.add(
+                        ValueFlowEdge(
+                            kind = ValueFlowEdgeKind.CALL_RECEIVER,
+                            from = node,
+                            to = ValueFlowNode(method = callee, token = "THIS"),
+                            offset = callOffset,
+                            details = "${node.method.id} -> ${callee.id} receiver",
+                        )
+                    )
+                }
+            }
+
+            for ((idx, arg) in call.args.withIndex()) {
+                if (arg != token) continue
+                for (callee in targets) {
+                    out.add(
+                        ValueFlowEdge(
+                            kind = ValueFlowEdgeKind.CALL_ARG,
+                            from = node,
+                            to = ValueFlowNode(method = callee, token = "PARAM:$idx"),
+                            offset = callOffset,
+                            details = "${node.method.id} -> ${callee.id} argIndex=$idx",
+                        )
+                    )
+                }
+            }
+        }
+
+        return out
+    }
+
+    private fun expandCallInputsApproxToResultsForward(node: ValueFlowNode, summary: MethodSummary, contextOffset: Int?): List<ValueFlowEdge> {
+        val token = node.token.trim()
+        if (token.isBlank() || isUnknownToken(token)) return emptyList()
+
+        fun isExternalOrUnmodeled(call: CallSiteSummary): Boolean {
+            val targets = possibleCallTargets(caller = node.method, declaredCalleeId = call.calleeId, callOffset = call.callOffset)
+            if (targets.isEmpty()) return true
+            return targets.none { summaries.summaries.containsKey(it) }
+        }
+
+        val out = mutableListOf<ValueFlowEdge>()
+        val seen = hashSetOf<String>()
+
+        fun addEdge(toToken: String, callOffset: Int?, details: String) {
+            if (toToken.isBlank() || isUnknownToken(toToken)) return
+            if (toToken == token) return
+            val key = "${callOffset ?: -1}:$toToken:$details"
+            if (!seen.add(key)) return
+            out.add(
+                ValueFlowEdge(
+                    kind = ValueFlowEdgeKind.CALL_APPROX,
+                    from = node,
+                    to = ValueFlowNode(method = node.method, token = toToken),
+                    offset = callOffset,
+                    details = details,
+                )
+            )
+        }
+
+        for (call in summary.calls) {
+            val recvMatches = call.receiver?.trim() == token
+            val argIndex = call.args.indexOfFirst { it.trim() == token }
+            if (!recvMatches && argIndex < 0) continue
+            if (!isExternalOrUnmodeled(call)) continue
+
+            val callOffset = call.callOffset
+            if (contextOffset != null && callOffset != null && callOffset < contextOffset) continue
+            val callee = call.calleeId ?: "UNKNOWN_CALLEE"
+            val inputTag =
+                when {
+                    recvMatches -> "receiver"
+                    else -> "argIndex=$argIndex"
+                }
+
+            val resultToken = call.result?.trim()?.takeIf { it.isNotBlank() && !isUnknownToken(it) }
+            if (resultToken != null) {
+                addEdge(
+                    toToken = resultToken,
+                    callOffset = callOffset,
+                    details = "external-call $callee $inputTag -> result",
+                )
+            } else if (callOffset != null) {
+                addEdge(
+                    toToken = "$CALL_RESULT_TOKEN_PREFIX$callOffset",
+                    callOffset = callOffset,
+                    details = "external-call $callee $inputTag -> result",
+                )
+            }
+        }
+
+        return out
+    }
+
+    private fun expandReturnToCallerForward(node: ValueFlowNode): List<ValueFlowEdge> {
+        if (node.token != "RET") return emptyList()
+
+        val incomingCallers = graph.incoming[node.method].orEmpty()
+        if (incomingCallers.isEmpty()) return emptyList()
+
+        val out = mutableListOf<ValueFlowEdge>()
+        for (caller in incomingCallers) {
+            val callerSummary = summaries.summaries[caller] ?: continue
+            val directCallSites = callerSummary.calls.filter { it.calleeId == node.method.id }
+            val edgeCallOffsets =
+                graph.callSites[CallEdge(caller = caller, callee = node.method)]
+                    ?.mapTo(hashSetOf()) { it.startOffset }
+                    .orEmpty()
+            val callSites =
+                buildList {
+                    addAll(directCallSites)
+                    if (edgeCallOffsets.isNotEmpty()) {
+                        for (call in callerSummary.calls) {
+                            val offset = call.callOffset ?: continue
+                            if (offset in edgeCallOffsets) add(call)
+                        }
+                    }
+                }.distinctBy { "${it.callOffset}:${it.calleeId}" }
+
+            for (call in callSites) {
+                val mapped = call.result?.trim()?.takeIf { it.isNotBlank() && it != "UNKNOWN" } ?: continue
+                out.add(
+                    ValueFlowEdge(
+                        kind = ValueFlowEdgeKind.CALL_RETURN,
+                        from = node,
+                        to = ValueFlowNode(method = caller, token = mapped),
+                        offset = call.callOffset,
+                        details = "${caller.id} <- ${node.method.id} return",
+                    )
+                )
+            }
+        }
+
+        return out
+    }
+
+    private fun ownerClassFromFieldKey(token: String): String? {
+        if (!token.startsWith("THIS:")) return null
+        val suffix = token.substringAfter("THIS:", missingDelimiterValue = "").trim()
+        if (suffix.isBlank()) return null
+        val owner = suffix.substringBefore('#', missingDelimiterValue = "").trim()
+        return owner.takeIf { it.isNotBlank() }
+    }
+
+    private val injectableFieldsByOwnerClass: Map<String, List<Pair<String, List<InjectionSpec>>>> =
+        injectableFields.entries
+            .groupBy { ownerClassFromFieldKey(it.key) ?: "" }
+            .filterKeys { it.isNotBlank() }
+            .mapValues { (_, entries) -> entries.map { it.key to it.value } }
+
+    private val injectableParamsByMethodId: Map<String, List<Pair<String, List<InjectionSpec>>>> =
+        injectableParamsByKey.entries
+            .groupBy { it.key.substringBefore(':', missingDelimiterValue = "").trim() }
+            .filterKeys { it.isNotBlank() }
+            .mapValues { (_, entries) -> entries.map { it.key to it.value } }
+
+    private fun isBeanCandidateForTarget(beanTypeFqn: String, targetTypeFqn: String): Boolean {
+        if (beanTypeFqn == targetTypeFqn) return true
+        if (isAssignableMay(beanTypeFqn, targetTypeFqn)) return true
+        if (beanTypeFqn !in knownTypeChildren) return true
+        return false
+    }
+
+    private fun expandInjectEdgesForward(node: ValueFlowNode): List<ValueFlowEdge> {
+        if (frameworkModel == null) return emptyList()
+
+        val token = node.token
+        val out = mutableListOf<ValueFlowEdge>()
+
+        if (token.startsWith(BEAN_TOKEN_PREFIX)) {
+            val beanType = token.substringAfter(BEAN_TOKEN_PREFIX).trim().takeIf { it.isNotBlank() } ?: return emptyList()
+
+            injectableFieldsByOwnerClass[node.method.classFqn].orEmpty().forEach { (fieldKey, specs) ->
+                for (spec in specs) {
+                    if (!isBeanCandidateForTarget(beanType, spec.targetTypeFqn)) continue
+                    out.add(
+                        ValueFlowEdge(
+                            kind = ValueFlowEdgeKind.INJECT,
+                            from = node,
+                            to = ValueFlowNode(method = node.method, token = fieldKey),
+                            offset = spec.startOffset,
+                            filePath = spec.filePath,
+                            details = "inject ${spec.targetTypeFqn} <= $beanType",
+                        )
+                    )
+                }
+            }
+
+            injectableParamsByMethodId[node.method.id].orEmpty().forEach { (key, specs) ->
+                val suffix = key.substringAfter("${node.method.id}:", missingDelimiterValue = "").trim()
+                if (suffix.isBlank()) return@forEach
+                val targetToken = "PARAM:$suffix"
+                for (spec in specs) {
+                    if (!isBeanCandidateForTarget(beanType, spec.targetTypeFqn)) continue
+                    out.add(
+                        ValueFlowEdge(
+                            kind = ValueFlowEdgeKind.INJECT,
+                            from = node,
+                            to = ValueFlowNode(method = node.method, token = targetToken),
+                            offset = spec.startOffset,
+                            filePath = spec.filePath,
+                            details = "inject ${spec.targetTypeFqn} <= $beanType",
+                        )
+                    )
+                }
+            }
+        }
+
+        if (token.startsWith(INJECT_TOKEN_PREFIX)) {
+            val targetType = token.substringAfter(INJECT_TOKEN_PREFIX).trim().takeIf { it.isNotBlank() } ?: return emptyList()
+
+            injectableFieldsByOwnerClass[node.method.classFqn].orEmpty().forEach { (fieldKey, specs) ->
+                for (spec in specs) {
+                    if (spec.targetTypeFqn != targetType) continue
+                    out.add(
+                        ValueFlowEdge(
+                            kind = ValueFlowEdgeKind.INJECT,
+                            from = node,
+                            to = ValueFlowNode(method = node.method, token = fieldKey),
+                            offset = spec.startOffset,
+                            filePath = spec.filePath,
+                            details = "inject $targetType",
+                        )
+                    )
+                }
+            }
+
+            injectableParamsByMethodId[node.method.id].orEmpty().forEach { (key, specs) ->
+                val suffix = key.substringAfter("${node.method.id}:", missingDelimiterValue = "").trim()
+                if (suffix.isBlank()) return@forEach
+                val targetToken = "PARAM:$suffix"
+                for (spec in specs) {
+                    if (spec.targetTypeFqn != targetType) continue
+                    out.add(
+                        ValueFlowEdge(
+                            kind = ValueFlowEdgeKind.INJECT,
+                            from = node,
+                            to = ValueFlowNode(method = node.method, token = targetToken),
+                            offset = spec.startOffset,
+                            filePath = spec.filePath,
+                            details = "inject $targetType",
+                        )
+                    )
+                }
+            }
+        }
+
+        return out
+    }
+
+    private fun findForwardPath(
+        start: ValueFlowNode,
+        target: ValueFlowNode,
+        maxDepth: Int,
+        maxStates: Int,
+        maxHeapReadersPerStep: Int,
+    ): Map<ValueFlowNode, Parent>? {
+        if (start == target) return emptyMap()
+        if (maxDepth <= 0 || maxStates <= 0) return null
+
+        val queue = ArrayDeque<TraceState>()
+        val visited = linkedSetOf<ValueFlowNode>()
+        val parents = hashMapOf<ValueFlowNode, Parent>()
+        val safeReaders = maxHeapReadersPerStep.coerceIn(1, 200)
+
+        fun enqueue(next: ValueFlowNode, depth: Int, contextOffset: Int?, via: ValueFlowEdge) {
+            if (next.token.isBlank()) return
+            if (visited.size >= maxStates) return
+            if (!visited.add(next)) return
+            parents[next] = Parent(prev = via.from, via = via)
+            queue.addLast(TraceState(node = next, depth = depth, contextOffset = contextOffset))
+        }
+
+        visited.add(start)
+        queue.addLast(TraceState(node = start, depth = 0, contextOffset = null))
+
+        while (queue.isNotEmpty()) {
+            val (current, depth, currentOffset) = queue.removeFirst()
+
+            if (current == target) return parents
+
+            if (depth >= maxDepth) continue
+            val summary = summaries.summaries[current.method]
+
+            if (summary != null) {
+                expandCopiesForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandLoadsForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandStoresForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandCallFromCaller(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandCallInputsApproxToResultsForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandAllocForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+            }
+
+            expandInjectEdgesForward(current).forEach { edge ->
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+            }
+            expandReturnToCallerForward(current).forEach { edge ->
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+            }
+            expandHeapLoadsForward(current, safeReaders).forEach { edge ->
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+            }
+        }
+
+        return null
+    }
+
+    private fun traceFromEntryPoints(
+        sink: ValueFlowNode,
+        maxDepth: Int,
+        maxStates: Int,
+        maxHeapReadersPerStep: Int,
+        maxEntryPointSeeds: Int = 200,
+    ): ValueFlowTrace? {
+        if (graph.entryPoints.isEmpty()) return null
+        if (maxDepth <= 0 || maxStates <= 0) return null
+
+        val safeSeeds = maxEntryPointSeeds.coerceIn(1, 2_000)
+        val safeReaders = maxHeapReadersPerStep.coerceIn(1, 200)
+
+        fun candidateEntryPoints(target: MethodRef, maxVisitedMethods: Int = 20_000): List<MethodRef> {
+            val visited = hashSetOf<MethodRef>()
+            val queue = ArrayDeque<MethodRef>()
+            val found = linkedSetOf<MethodRef>()
+            visited.add(target)
+            queue.addLast(target)
+            while (queue.isNotEmpty()) {
+                val current = queue.removeFirst()
+                if (current in graph.entryPoints) {
+                    found.add(current)
+                }
+                if (visited.size >= maxVisitedMethods) break
+                for (caller in graph.incoming[current].orEmpty()) {
+                    if (visited.add(caller)) queue.addLast(caller)
+                }
+            }
+            return if (found.isNotEmpty()) found.toList() else graph.entryPoints.toList()
+        }
+
+        val seeds =
+            buildList<ValueFlowNode> {
+                for (ep in candidateEntryPoints(sink.method)) {
+                    val count = ep.paramCount.coerceIn(0, 50)
+                    for (idx in 0 until count) {
+                        add(ValueFlowNode(method = ep, token = "PARAM:$idx"))
+                        if (size >= safeSeeds) return@buildList
+                    }
+                }
+            }
+
+        if (seeds.isEmpty()) return null
+
+        fun invert(edge: ValueFlowEdge): ValueFlowEdge =
+            ValueFlowEdge(
+                kind = edge.kind,
+                from = edge.to,
+                to = edge.from,
+                offset = edge.offset,
+                filePath = edge.filePath,
+                details = edge.details,
+            )
+
+        val queue = ArrayDeque<TraceState>()
+        val visited = linkedSetOf<ValueFlowNode>()
+        val parents = hashMapOf<ValueFlowNode, Parent>()
+
+        fun enqueue(next: ValueFlowNode, depth: Int, contextOffset: Int?, via: ValueFlowEdge) {
+            if (next.token.isBlank()) return
+            if (visited.size >= maxStates) return
+            if (!visited.add(next)) return
+            parents[next] = Parent(prev = via.from, via = via)
+            queue.addLast(TraceState(node = next, depth = depth, contextOffset = contextOffset))
+        }
+
+        for (seed in seeds) {
+            if (visited.size >= maxStates) break
+            if (visited.add(seed)) {
+                queue.addLast(TraceState(node = seed, depth = 0, contextOffset = null))
+            }
+        }
+
+        while (queue.isNotEmpty()) {
+            val (current, depth, currentOffset) = queue.removeFirst()
+            if (current == sink) {
+                val (root, forwardEdges) = reconstructToAnyStart(end = sink, parents = parents)
+                val backwardEdges = forwardEdges.asReversed().map(::invert)
+                return ValueFlowTrace(start = sink, end = root, edges = backwardEdges)
+            }
+
+            if (depth >= maxDepth) continue
+            val summary = summaries.summaries[current.method]
+            if (summary != null) {
+                expandCopiesForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandLoadsForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandStoresForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandCallFromCaller(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandCallInputsApproxToResultsForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+                expandAllocForward(current, summary, currentOffset).forEach { edge ->
+                    enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+                }
+            }
+
+            expandInjectEdgesForward(current).forEach { edge ->
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+            }
+            expandReturnToCallerForward(current).forEach { edge ->
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+            }
+            expandHeapLoadsForward(current, safeReaders).forEach { edge ->
+                enqueue(edge.to, depth + 1, edge.offset ?: currentOffset, edge)
+            }
+        }
+
+        return null
+    }
+
+    private fun reconstructToAnyStart(
+        end: ValueFlowNode,
+        parents: Map<ValueFlowNode, Parent>,
+    ): Pair<ValueFlowNode, List<ValueFlowEdge>> {
+        val reversed = mutableListOf<ValueFlowEdge>()
+        var cur = end
+        while (true) {
+            val parent = parents[cur] ?: break
+            reversed.add(parent.via)
+            cur = parent.prev
+        }
+        return cur to reversed.reversed()
     }
 
     private fun reconstructEdges(

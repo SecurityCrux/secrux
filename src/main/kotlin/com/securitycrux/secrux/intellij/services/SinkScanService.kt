@@ -1,7 +1,6 @@
 package com.securitycrux.secrux.intellij.services
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
@@ -77,6 +76,7 @@ class SinkScanService(
     }
 
     private fun scanInternal(indicator: ProgressIndicator): List<SinkMatch> {
+        val dumbService = DumbService.getInstance(project)
         val settings = SecruxProjectSettings.getInstance(project).state
         val sinkRegistry = buildSinkRegistry(settings)
         val excludedPathRegex =
@@ -89,7 +89,7 @@ class SinkScanService(
 
         val scope = GlobalSearchScope.projectScope(project)
         val sourceFiles =
-            ReadAction.compute<List<VirtualFile>, RuntimeException> {
+            dumbService.runReadActionInSmartMode<List<VirtualFile>> {
                 val fileIndex = ProjectFileIndex.getInstance(project)
                 val javaFiles = FilenameIndex.getAllFilesByExt(project, "java", scope)
                 val kotlinFiles = FilenameIndex.getAllFilesByExt(project, "kt", scope)
@@ -115,11 +115,15 @@ class SinkScanService(
             indicator.text = SecruxBundle.message("progress.scanningFile", file.name)
             indicator.fraction = i.toDouble() / total.toDouble()
 
-            ReadAction.run<RuntimeException> {
-                val psiFile = psiManager.findFile(file) ?: return@run
+            if (dumbService.isDumb) {
+                indicator.text = "Indexing in progress; waiting for smart mode"
+            }
+
+            dumbService.runReadActionInSmartMode {
+                val psiFile = psiManager.findFile(file) ?: return@runReadActionInSmartMode
                 val document = psiDocumentManager.getDocument(psiFile)
 
-                val uFile = psiFile.toUElementOfType<UFile>() ?: return@run
+                val uFile = psiFile.toUElementOfType<UFile>() ?: return@runReadActionInSmartMode
                 uFile.accept(
                     object : AbstractUastVisitor() {
                         override fun visitCallExpression(node: UCallExpression): Boolean {

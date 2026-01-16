@@ -170,6 +170,18 @@ class SecruxApiClient(
             }
     }
 
+    fun createProject(bodyJson: String): String {
+        val url = "${baseUrl.trimEnd('/')}/projects"
+        return HttpRequests.post(url, "application/json")
+            .tuner { connection ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.setRequestProperty("Accept", "application/json")
+            }.connect { request ->
+                request.write(bodyJson)
+                request.readString()
+            }
+    }
+
     fun listRepositories(projectId: String): String {
         val url = "${baseUrl.trimEnd('/')}/projects/${projectId.trim()}/repositories"
         return HttpRequests.request(url)
@@ -177,6 +189,18 @@ class SecruxApiClient(
                 connection.setRequestProperty("Authorization", "Bearer $token")
                 connection.setRequestProperty("Accept", "application/json")
             }.connect { request ->
+                request.readString()
+            }
+    }
+
+    fun createRepository(projectId: String, bodyJson: String): String {
+        val url = "${baseUrl.trimEnd('/')}/projects/${projectId.trim()}/repositories"
+        return HttpRequests.post(url, "application/json")
+            .tuner { connection ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.setRequestProperty("Accept", "application/json")
+            }.connect { request ->
+                request.write(bodyJson)
                 request.readString()
             }
     }

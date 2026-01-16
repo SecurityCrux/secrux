@@ -92,18 +92,27 @@ object PointsToIndexBuilder {
     }
 
     private fun mergeRootSets(a: RootSet, b: RootSet, maxRoots: Int): RootSet {
-        if (a.truncated || b.truncated) return RootSet(intArrayOf(PointsToIndex.ROOT_UNKNOWN_ID), truncated = true)
-        if (a.isUnknownOnly() || b.isUnknownOnly()) return RootSet(intArrayOf(PointsToIndex.ROOT_UNKNOWN_ID), truncated = false)
-
+        val truncatedInput = a.truncated || b.truncated
         val left = a.rootIds
         val right = b.rootIds
-        if (left.isEmpty()) return b
-        if (right.isEmpty()) return a
+        if (left.isEmpty()) return RootSet(rootIds = right, truncated = truncatedInput)
+        if (right.isEmpty()) return RootSet(rootIds = left, truncated = truncatedInput)
 
-        val merged = IntArray(left.size + right.size)
+        val merged = IntArray(minOf(left.size + right.size, maxRoots))
         var i = 0
         var j = 0
         var k = 0
+        var overflow = false
+
+        fun add(next: Int) {
+            if (k > 0 && merged[k - 1] == next) return
+            if (k < maxRoots) {
+                merged[k++] = next
+            } else {
+                overflow = true
+            }
+        }
+
         while (i < left.size || j < right.size) {
             val next =
                 when {
@@ -118,12 +127,26 @@ object PointsToIndexBuilder {
                         v
                     }
                 }
-            merged[k++] = next
-            if (k > maxRoots) {
-                return RootSet(intArrayOf(PointsToIndex.ROOT_UNKNOWN_ID), truncated = true)
-            }
+            add(next)
         }
-        return RootSet(merged.copyOf(k), truncated = false)
+
+        var out = merged.copyOf(k)
+        if (overflow && (out.isEmpty() || out[0] != PointsToIndex.ROOT_UNKNOWN_ID)) {
+            out =
+                if (out.size < maxRoots) {
+                    val inserted = IntArray(out.size + 1)
+                    inserted[0] = PointsToIndex.ROOT_UNKNOWN_ID
+                    out.copyInto(inserted, destinationOffset = 1)
+                    inserted
+                } else {
+                    val inserted = IntArray(maxRoots)
+                    inserted[0] = PointsToIndex.ROOT_UNKNOWN_ID
+                    out.copyInto(inserted, destinationOffset = 1, startIndex = 0, endIndex = maxRoots - 1)
+                    inserted
+                }
+        }
+
+        return RootSet(rootIds = out, truncated = truncatedInput || overflow)
     }
 
     private data class CandidateTypes(
@@ -436,8 +459,10 @@ object PointsToIndexBuilder {
 
         indicator?.text = "points-to: building constraints"
         for ((method, summary) in summaries.summaries) {
-            for (alias in summary.aliases) {
-                addBiDependency(method, alias.left, alias.right)
+            for (copy in summary.aliases) {
+                val left = normalizeToken(copy.left) ?: continue
+                val right = normalizeToken(copy.right) ?: continue
+                addDependency(key(method, left), toMethod = method, toToken = right)
             }
             for (load in summary.loads) {
                 val target = normalizeToken(load.target) ?: continue
