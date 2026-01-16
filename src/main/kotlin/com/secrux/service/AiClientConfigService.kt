@@ -45,11 +45,12 @@ class AiClientConfigService(
         if (request.isDefault) {
             repository.clearDefault(tenantId)
         }
+        val resolvedApiKey = request.apiKey?.trim()?.takeIf { it.isNotEmpty() } ?: existing.apiKey
         val updated = existing.copy(
             name = request.name,
             provider = request.provider,
             baseUrl = request.baseUrl,
-            apiKey = request.apiKey,
+            apiKey = resolvedApiKey,
             model = request.model,
             isDefault = request.isDefault,
             enabled = request.enabled,
@@ -76,4 +77,3 @@ class AiClientConfigService(
             updatedAt = updatedAt?.toString()
         )
 }
-

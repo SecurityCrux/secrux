@@ -29,6 +29,7 @@ class SecurityConfig(
     private val authProperties: SecruxAuthProperties,
     private val principalSyncFilter: PrincipalSyncFilter,
     private val requestMdcFilter: RequestMdcFilter,
+    private val idePluginTokenAuthenticationFilter: IdePluginTokenAuthenticationFilter,
     private val authenticationEntryPoint: ApiAuthenticationEntryPoint,
     private val accessDeniedHandler: ApiAccessDeniedHandler,
     private val userDirectoryRepository: AppUserDirectoryRepository,
@@ -69,15 +70,22 @@ class SecurityConfig(
                 }
             }.addFilterAfter(requestMdcFilter, AuthorizationFilter::class.java)
             .addFilterAfter(principalSyncFilter, RequestMdcFilter::class.java)
+            .addFilterBefore(idePluginTokenAuthenticationFilter, AuthorizationFilter::class.java)
         return http.build()
     }
 
     @Bean
     fun bearerTokenResolver(): BearerTokenResolver =
-        DefaultBearerTokenResolver().apply {
-            setAllowUriQueryParameter(false)
-            setAllowFormEncodedBodyParameter(false)
-        }
+        DefaultBearerTokenResolver()
+            .apply {
+                setAllowUriQueryParameter(false)
+                setAllowFormEncodedBodyParameter(false)
+            }.let { delegate ->
+                BearerTokenResolver { request ->
+                    val token = delegate.resolve(request)
+                    token?.takeUnless { IdePluginTokenFormat.isIdePluginToken(it) }
+                }
+            }
 
     @Bean
     fun jwtDecoder(): JwtDecoder =

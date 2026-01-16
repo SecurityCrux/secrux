@@ -3,7 +3,7 @@ package com.secrux.domain
 import java.time.OffsetDateTime
 import java.util.UUID
 
-enum class TaskType { CODE_CHECK, SECURITY_SCAN, SUPPLY_CHAIN, SCA_CHECK }
+enum class TaskType { CODE_CHECK, SECURITY_SCAN, SUPPLY_CHAIN, SCA_CHECK, IDE_AUDIT }
 
 enum class TaskStatus { PENDING, RUNNING, SUCCEEDED, FAILED, CANCELED }
 

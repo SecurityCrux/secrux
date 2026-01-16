@@ -21,4 +21,3 @@ data class RefreshToken(
     val revokedAt: OffsetDateTime?,
     val createdAt: OffsetDateTime
 )
-

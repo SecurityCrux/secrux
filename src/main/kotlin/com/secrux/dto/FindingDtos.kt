@@ -126,6 +126,8 @@ data class FindingDetailResponse(
     val codeSnippet: CodeSnippetDto?,
     val dataFlowNodes: List<DataFlowNodeDto>,
     val dataFlowEdges: List<DataFlowEdgeDto>,
+    val callChains: List<CallChainDto> = emptyList(),
+    val enrichment: Map<String, Any?>? = null,
     val review: FindingReviewSummary? = null
 )
 

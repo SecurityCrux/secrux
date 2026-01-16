@@ -37,6 +37,7 @@ class FindingCommandService(
     private val findingReviewService: FindingReviewService,
     private val aiReviewEnrichmentService: AiReviewEnrichmentService,
     private val evidenceService: FindingEvidenceService,
+    private val dataflowCallChainService: DataflowCallChainService,
     private val findingSummaryMapper: FindingSummaryMapper,
     private val clock: Clock
 ) {
@@ -166,15 +167,21 @@ class FindingCommandService(
     ): AiJobTicketResponse =
         findingRepository.findById(findingId, tenantId)?.let { finding ->
             val snippet = evidenceService.loadSnippet(finding.location)
-            val (nodes, edges) = evidenceService.parseDataflow(finding.evidence)
+                ?: evidenceService.extractSnippetFromEvidence(finding.evidence)
+            val (nodesRaw, edges) = evidenceService.parseDataflow(finding.evidence)
             val aiClientConfig = aiClientConfigRepository.findDefaultEnabled(tenantId)
-            val enrichment = aiReviewEnrichmentService.enrich(
+            val platformEnrichment = aiReviewEnrichmentService.enrich(
                 finding = finding,
                 snippet = snippet,
-                dataFlowNodes = nodes,
+                dataFlowNodes = nodesRaw,
                 dataFlowEdges = edges,
                 mode = request?.mode
             )
+            val evidenceEnrichment = evidenceService.extractEnrichmentFromEvidence(finding.evidence)
+            val enrichment = platformEnrichment ?: evidenceEnrichment
+            val nodes = nodesRaw.map { node -> node.copy(file = evidenceService.normalizeWorkspaceNodeFile(finding.taskId, node.file)) }
+            val callChainsRaw = dataflowCallChainService.buildCallChains(nodes = nodes, edges = edges)
+            val callChains = evidenceService.normalizeCallChainsForDisplay(taskId = finding.taskId, callChains = callChainsRaw)
             val ticket = aiClient.review(
                 AiReviewRequest(
                     tenantId = tenantId.toString(),
@@ -193,6 +200,7 @@ class FindingCommandService(
                                 "location" to finding.location,
                                 "codeSnippet" to snippet,
                                 "dataflow" to mapOf("nodes" to nodes, "edges" to edges),
+                                "callChains" to callChains,
                                 "enrichment" to enrichment
                             ),
                             "mode" to request?.mode

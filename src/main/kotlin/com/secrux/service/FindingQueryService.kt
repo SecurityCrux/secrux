@@ -24,6 +24,7 @@ class FindingQueryService(
     private val findingRepository: FindingRepository,
     private val findingReviewService: FindingReviewService,
     private val evidenceService: FindingEvidenceService,
+    private val dataflowCallChainService: DataflowCallChainService,
     private val findingSummaryMapper: FindingSummaryMapper
 ) {
 
@@ -61,8 +62,12 @@ class FindingQueryService(
         val finding = findingRepository.findById(findingId, tenantId)
             ?: throw SecruxException(ErrorCode.FINDING_NOT_FOUND, "Finding not found")
         val snippet = evidenceService.loadSnippet(finding.location)
+            ?: evidenceService.extractSnippetFromEvidence(finding.evidence)
+        val enrichment = evidenceService.extractEnrichmentFromEvidence(finding.evidence)
         val (nodesRaw, edges) = evidenceService.parseDataflow(finding.evidence)
         val nodes = nodesRaw.map { node -> node.copy(file = evidenceService.normalizeWorkspaceNodeFile(finding.taskId, node.file)) }
+        val callChainsRaw = dataflowCallChainService.buildCallChains(nodes = nodes, edges = edges)
+        val callChains = evidenceService.normalizeCallChainsForDisplay(taskId = finding.taskId, callChains = callChainsRaw)
         val task = taskRepository.findById(finding.taskId, tenantId)
         val project = projectRepository.findById(finding.projectId, tenantId)
         val repo = task?.repoId?.let { repoId -> repositoryRepository.findById(repoId, tenantId) }
@@ -86,6 +91,8 @@ class FindingQueryService(
             codeSnippet = snippet,
             dataFlowNodes = nodes,
             dataFlowEdges = edges,
+            callChains = callChains,
+            enrichment = enrichment,
             review = review
         )
     }
@@ -99,12 +106,21 @@ class FindingQueryService(
     ): CodeSnippetDto? {
         val finding = findingRepository.findById(findingId, tenantId)
             ?: throw SecruxException(ErrorCode.FINDING_NOT_FOUND, "Finding not found")
-        return evidenceService.getSnippetForTaskWorkspace(
-            taskId = finding.taskId,
-            path = path,
-            line = line,
-            context = context
-        )
+        val fromWorkspace =
+            evidenceService.getSnippetForTaskWorkspace(
+                taskId = finding.taskId,
+                path = path,
+                line = line,
+                context = context
+            )
+        if (fromWorkspace != null) return fromWorkspace
+
+        val fromEvidence = evidenceService.extractSnippetFromEvidence(finding.evidence)
+        if (fromEvidence != null && fromEvidence.path == path && line in fromEvidence.startLine..fromEvidence.endLine) {
+            return fromEvidence
+        }
+
+        return evidenceService.extractSnippetFromDataflowNode(finding.evidence, path, line)
     }
 
     fun listFindingsByProject(

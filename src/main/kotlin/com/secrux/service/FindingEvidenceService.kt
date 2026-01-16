@@ -2,6 +2,8 @@ package com.secrux.service
 
 import com.secrux.common.ErrorCode
 import com.secrux.common.SecruxException
+import com.secrux.dto.CallChainDto
+import com.secrux.dto.CallChainStepDto
 import com.secrux.dto.CodeLineDto
 import com.secrux.dto.CodeSnippetDto
 import com.secrux.dto.DataFlowEdgeDto
@@ -58,6 +60,67 @@ class FindingEvidenceService(
         )
     }
 
+    fun extractSnippetFromEvidence(evidence: Map<String, Any?>?): CodeSnippetDto? {
+        if (evidence.isNullOrEmpty()) return null
+        val snippet = evidence["codeSnippet"] as? Map<*, *> ?: return null
+        return parseSnippetMap(snippet)
+    }
+
+    fun extractEnrichmentFromEvidence(evidence: Map<String, Any?>?): Map<String, Any?>? {
+        if (evidence.isNullOrEmpty()) return null
+        val enrichment = evidence["enrichment"] as? Map<*, *> ?: return null
+        return enrichment.entries.associate { (k, v) -> k.toString() to v }
+    }
+
+    fun extractSnippetFromDataflowNode(evidence: Map<String, Any?>?, path: String, line: Int): CodeSnippetDto? {
+        if (evidence.isNullOrEmpty()) return null
+        val df = evidence["dataflow"] ?: evidence["dataFlow"] ?: return null
+        val map = df as? Map<*, *> ?: return null
+        val nodes = map["nodes"] as? List<*> ?: return null
+
+        val node =
+            nodes.asSequence()
+                .mapNotNull { it as? Map<*, *> }
+                .firstOrNull { raw ->
+                    val file = raw["file"]?.toString()
+                    val nodeLine = (raw["line"] as? Number)?.toInt()
+                    file == path && nodeLine == line
+                } ?: return null
+
+        val nodeSnippet = node["codeSnippet"] as? Map<*, *>
+        if (nodeSnippet != null) {
+            parseSnippetMap(nodeSnippet)?.let { return it }
+        }
+
+        val text = node["value"]?.toString()?.take(400)?.takeIf { it.isNotBlank() } ?: return null
+        return CodeSnippetDto(
+            path = path,
+            startLine = line,
+            endLine = line,
+            lines = listOf(CodeLineDto(lineNumber = line, content = text, highlight = true))
+        )
+    }
+
+    private fun parseSnippetMap(snippet: Map<*, *>): CodeSnippetDto? {
+        val path = snippet["path"]?.toString()?.trim().takeIf { !it.isNullOrBlank() } ?: return null
+        val startLine = (snippet["startLine"] as? Number)?.toInt() ?: return null
+        val endLine = (snippet["endLine"] as? Number)?.toInt() ?: return null
+        if (startLine <= 0 || endLine <= 0 || endLine < startLine) return null
+        val linesRaw = snippet["lines"] as? List<*> ?: return null
+        val lines =
+            linesRaw.asSequence()
+                .mapNotNull { it as? Map<*, *> }
+                .mapNotNull { line ->
+                    val lineNumber = (line["lineNumber"] as? Number)?.toInt() ?: return@mapNotNull null
+                    val content = line["content"]?.toString()?.take(400) ?: return@mapNotNull null
+                    val highlight = line["highlight"] as? Boolean ?: false
+                    CodeLineDto(lineNumber = lineNumber, content = content, highlight = highlight)
+                }.take(200)
+                .toList()
+        if (lines.isEmpty()) return null
+        return CodeSnippetDto(path = path, startLine = startLine, endLine = endLine, lines = lines)
+    }
+
     fun getSnippetForTaskWorkspace(taskId: UUID, path: String, line: Int, context: Int): CodeSnippetDto? {
         val safeContext = context.coerceIn(0, 50)
         if (line <= 0) return null
@@ -98,7 +161,7 @@ class FindingEvidenceService(
                 val value = obj["value"]?.toString() ?: inferred.second
                 DataFlowNodeDto(
                     id = id,
-                    label = value ?: label,
+                    label = label,
                     role = role,
                     value = value,
                     file = obj["file"]?.toString(),
@@ -119,6 +182,83 @@ class FindingEvidenceService(
                 )
             }
         return nodes to edges
+    }
+
+    fun normalizeCallChainsForDisplay(taskId: UUID, callChains: List<CallChainDto>, maxLookahead: Int = 20): List<CallChainDto> {
+        if (callChains.isEmpty()) return callChains
+
+        val safeLookahead = maxLookahead.coerceIn(0, 200)
+        val fileLinesCache = mutableMapOf<String, List<String>?>()
+
+        fun readLines(path: String): List<String>? {
+            return fileLinesCache.getOrPut(path) {
+                runCatching {
+                    val resolved = resolveTaskWorkspaceFilePath(taskId, path)
+                    if (!Files.exists(resolved) || !Files.isRegularFile(resolved)) return@getOrPut null
+                    Files.readAllLines(resolved)
+                }.getOrNull()
+            }
+        }
+
+        fun isCommentLine(text: String?): Boolean {
+            val t = text?.trim().orEmpty()
+            if (t.isBlank()) return false
+            return t.startsWith("/**") ||
+                t.startsWith("/*") ||
+                t.startsWith("*") ||
+                t.startsWith("*/") ||
+                t.startsWith("//") ||
+                t.startsWith("#") ||
+                t.startsWith("<!--")
+        }
+
+        fun findPreferredLine(lines: List<String>, startLine: Int): Int? {
+            if (startLine <= 0 || startLine > lines.size) return null
+            val startText = lines[startLine - 1]
+            if (!isCommentLine(startText)) return startLine
+
+            var firstNonComment: Int? = null
+            val end = min(lines.size, startLine + safeLookahead)
+            for (line in startLine..end) {
+                val raw = lines[line - 1]
+                val t = raw.trim()
+                if (t.isBlank()) continue
+                if (isCommentLine(t)) continue
+                if (firstNonComment == null) firstNonComment = line
+                if (!t.startsWith("@")) return line
+            }
+            return firstNonComment
+        }
+
+        fun normalizeStep(step: CallChainStepDto): CallChainStepDto {
+            val file = step.file?.trim()?.takeIf { it.isNotBlank() } ?: return step
+            val line = step.line ?: return step
+            val needsFix = isCommentLine(step.label) || isCommentLine(step.snippet)
+            if (!needsFix) return step
+
+            val lines = readLines(file) ?: return step
+            val preferredLine = findPreferredLine(lines, line) ?: return step
+            val preferredText = lines.getOrNull(preferredLine - 1)?.take(400) ?: return step
+
+            val updatedLabel = if (isCommentLine(step.label)) preferredText else step.label
+            val updatedSnippet =
+                when {
+                    step.snippet.isNullOrBlank() -> preferredText
+                    isCommentLine(step.snippet) -> preferredText
+                    else -> step.snippet
+                }
+
+            if (preferredLine == line && updatedLabel == step.label && updatedSnippet == step.snippet) return step
+            return step.copy(
+                label = updatedLabel,
+                line = preferredLine,
+                snippet = updatedSnippet
+            )
+        }
+
+        return callChains.map { chain ->
+            chain.copy(steps = chain.steps.map { step -> normalizeStep(step) })
+        }
     }
 
     fun hasDataFlow(evidence: Map<String, Any?>?): Boolean {

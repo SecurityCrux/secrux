@@ -161,9 +161,79 @@ class JavaCodeEnricher(
                 emptyList()
             }
 
+        val roleByNodeId = dataFlowNodes.associate { it.id to it.role }
+
+        fun reason(
+            code: String,
+            titleZh: String,
+            titleEn: String,
+            detailsZh: String,
+            detailsEn: String,
+        ): Map<String, Any?> =
+            mapOf(
+                "code" to code,
+                "titleI18n" to mapOf("zh" to titleZh, "en" to titleEn),
+                "detailsI18n" to mapOf("zh" to detailsZh, "en" to detailsEn),
+            )
+
+        val blocks =
+            buildList<Map<String, Any?>>() {
+                if (primarySummary != null) {
+                    add(
+                        mapOf(
+                            "id" to "primary.method",
+                            "kind" to "METHOD",
+                            "reason" to
+                                reason(
+                                    code = "PRIMARY_METHOD",
+                                    titleZh = "主方法上下文",
+                                    titleEn = "Primary method context",
+                                    detailsZh = "漏洞命中点所在方法的完整上下文（用于人类/AI 理解漏洞发生位置与周边逻辑）。",
+                                    detailsEn = "Full method context containing the finding location (for humans/AI to understand surrounding logic).",
+                                ),
+                            "file" to mapOf("path" to primaryPathRaw, "language" to "java"),
+                            "range" to mapOf("startLine" to primarySummary["startLine"], "endLine" to primarySummary["endLine"], "highlightLines" to listOf(primaryLine)),
+                            "related" to mapOf("findingLine" to primaryLine),
+                            "method" to primarySummary,
+                            "conditions" to primaryConditions,
+                            "invocations" to primaryInvocations,
+                        ),
+                    )
+                }
+                for (nodeMethod in dataflowMethods) {
+                    val nodeId = nodeMethod["nodeId"]?.toString() ?: continue
+                    val label = nodeMethod["label"]?.toString() ?: nodeId
+                    val path = nodeMethod["path"]?.toString()
+                    val line = nodeMethod["line"] as? Int
+                    val method = nodeMethod["method"]
+                    add(
+                        mapOf(
+                            "id" to "node.$nodeId.method",
+                            "kind" to "METHOD",
+                            "reason" to
+                                reason(
+                                    code = "DATAFLOW_NODE_METHOD",
+                                    titleZh = "链路节点方法上下文",
+                                    titleEn = "Chain-node method context",
+                                    detailsZh = "数据流节点（$label）所在方法的上下文，用于解释该节点的周边逻辑与潜在约束条件。",
+                                    detailsEn = "Context of the method containing the dataflow node ($label), to explain nearby logic and possible constraints.",
+                                ),
+                            "file" to (path?.let { p -> mapOf("path" to p, "language" to "java") }),
+                            "range" to mapOf("highlightLines" to listOfNotNull(line)),
+                            "related" to mapOf("nodeId" to nodeId, "label" to label, "role" to roleByNodeId[nodeId]),
+                            "method" to method,
+                            "conditions" to (nodeMethod["neighborhood"] as? Map<*, *>)?.get("conditions"),
+                            "invocations" to (nodeMethod["neighborhood"] as? Map<*, *>)?.get("invocations"),
+                        ),
+                    )
+                }
+            }
+
         return mapOf(
             "engine" to "java-ast-enricher",
+            "version" to 2,
             "generatedAt" to clock.instant().toString(),
+            "blocks" to blocks,
             "primary" to mapOf(
                 "path" to primaryPathRaw,
                 "line" to primaryLine,
