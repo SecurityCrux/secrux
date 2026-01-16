@@ -1,0 +1,24 @@
+<svg width="200" height="200" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient id="ringGradient" x1="10" y1="10" x2="90" y2="90" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#0F2045" />
+            <stop offset="100%" stop-color="#1A3A75" />
+        </linearGradient>
+        <linearGradient id="cruxCoreGradient" x1="30" y1="50" x2="70" y2="50" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#00C6FF" />
+            <stop offset="100%" stop-color="#0072FF" />
+        </linearGradient>
+    </defs>
+
+    <circle cx="50" cy="50" r="44" stroke="url(#ringGradient)" stroke-width="6" fill="none"/>
+    
+    <circle cx="50" cy="50" r="35" stroke="#1A3A75" stroke-width="1" opacity="0.3" fill="none"/>
+
+    <g stroke="url(#cruxCoreGradient)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <path d="M 40 32 L 28 50 L 40 68"/>
+        <path d="M 60 32 L 72 50 L 60 68"/>
+        <path d="M 28 50 L 72 50" stroke-width="3" opacity="0.8"/>
+    </g>
+    
+    <circle cx="50" cy="50" r="3.5" fill="#FFFFFF"/>
+</svg>

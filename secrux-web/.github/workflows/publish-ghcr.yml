@@ -1,0 +1,87 @@
+name: Publish Docker image to GHCR
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-ghcr-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: meta
+        env:
+          REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          registry_image="$(echo "${REGISTRY_IMAGE}" | tr '[:upper:]' '[:lower:]')"
+
+          tag="${{ github.event.release.tag_name }}"
+          prerelease="${{ github.event.release.prerelease }}"
+
+          stripped="${tag#v}"
+
+          tags=("${registry_image}:${tag}")
+          if [[ "${stripped}" != "${tag}" ]]; then
+            tags+=("${registry_image}:${stripped}")
+          fi
+
+          if [[ "${prerelease}" != "true" && "${tag}" != *"-"* ]]; then
+            tags+=("${registry_image}:latest")
+          fi
+
+          {
+            echo "tags<<EOF"
+            printf "%s\n" "${tags[@]}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set package visibility to public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          package="$(echo "${REPOSITORY##*/}" | tr '[:upper:]' '[:lower:]')"
+
+          if gh api -X PATCH "/orgs/${OWNER}/packages/container/${package}/visibility" -f visibility=public >/dev/null 2>&1; then
+            echo "Set org package visibility to public: ${package}"
+            exit 0
+          fi
+
+          gh api -X PATCH "/users/${OWNER}/packages/container/${package}/visibility" -f visibility=public >/dev/null
+          echo "Set user package visibility to public: ${package}"

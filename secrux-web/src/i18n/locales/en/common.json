@@ -1,0 +1,1224 @@
+{
+  "app": {
+    "name": "Secrux Console"
+  },
+  "users": {
+    "title": "User management",
+    "subtitle": "Manage users, profiles, and role assignments.",
+    "listTitle": "Users",
+    "searchPlaceholder": "Search username or email",
+    "create": "Create user",
+    "creating": "Creating...",
+    "error": "Failed to load users.",
+    "empty": "No users found.",
+    "editTitle": "Edit user",
+    "accessDenied": "You do not have permission to manage users.",
+    "columns": {
+      "username": "Username",
+      "email": "Email",
+      "enabled": "Enabled",
+      "actions": "Actions"
+    },
+    "actions": {
+      "edit": "Edit",
+      "enable": "Enable",
+      "disable": "Disable",
+      "resetPassword": "Reset password",
+      "resetting": "Resetting..."
+    },
+    "fields": {
+      "phone": "Phone",
+      "name": "Name",
+      "roles": "Roles",
+      "effectivePermissions": "Effective permissions"
+    },
+    "rolesEmpty": "No roles available.",
+    "errors": {
+      "passwordRequired": "Password is required."
+    },
+    "prompts": {
+      "username": "Username",
+      "email": "Email (optional)",
+      "password": "Initial password",
+      "resetPassword": "New password"
+    }
+  },
+  "roles": {
+    "title": "Role management",
+    "subtitle": "Create role groups and manage permission sets.",
+    "listTitle": "Roles",
+    "searchPlaceholder": "Search by key or name",
+    "create": "Create role",
+    "builtIn": "Built-in",
+    "error": "Failed to load roles.",
+    "empty": "No roles found.",
+    "accessDenied": "You do not have permission to manage roles.",
+    "selectedCount": "{{count}} selected",
+    "permissionFilter": "Filter permissions...",
+    "noPermissions": "No permissions.",
+    "columns": {
+      "name": "Name",
+      "key": "Key",
+      "description": "Description",
+      "actions": "Actions"
+    },
+    "fields": {
+      "key": "Key",
+      "name": "Name",
+      "description": "Description",
+      "permissions": "Permissions"
+    },
+    "actions": {
+      "edit": "Edit",
+      "permissions": "Permissions",
+      "delete": "Delete",
+      "confirmDelete": "Delete this role?"
+    },
+    "dialog": {
+      "createTitle": "Create role",
+      "editTitle": "Edit role",
+      "permissionsTitle": "Edit permissions",
+      "permissionsHint": "Editing permissions for {{name}}"
+    }
+  },
+  "tenant": {
+    "title": "Tenant",
+    "subtitle": "Manage tenant profile settings.",
+    "cardTitle": "Tenant settings",
+    "error": "Failed to load tenant.",
+    "empty": "Tenant not found.",
+    "accessDenied": "You do not have permission to manage tenant settings.",
+    "fields": {
+      "name": "Name",
+      "contactEmail": "Contact email",
+      "tenantId": "Tenant ID",
+      "plan": "Plan"
+    }
+  },
+  "auth": {
+    "title": "Welcome back",
+    "subtitle": "Sign in to orchestrate inspections, baselines, and tickets.",
+    "username": "Username",
+    "password": "Password",
+    "remember": "Remember this device",
+    "actions": {
+      "signin": "Sign in",
+      "signingIn": "Signing in..."
+    },
+    "errors": {
+      "invalid": "Invalid username or password",
+      "unexpected": "We could not complete your sign-in. Please retry."
+    },
+    "success": "Hello {{name}}"
+  },
+  "language": {
+    "label": "Language",
+    "en": "English",
+    "zh": "简体中文"
+  },
+  "theme": {
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "setup": {
+    "title": "Welcome to Secrux",
+    "subtitle": "Choose your default language and theme.",
+    "continue": "Continue"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "tasks": "Task Explorer",
+    "intellijPlugin": "IntelliJ Plugin",
+    "rules": "Rules",
+    "findings": "Findings",
+    "sca": "SCA",
+    "tickets": "Tickets",
+    "aiClients": "AI Clients",
+    "aiKnowledge": "AI Knowledge",
+    "executors": "Executors",
+    "users": "User Management",
+    "roles": "Role Management",
+    "tenant": "Tenant"
+  },
+  "idePlugins": {
+    "intellij": {
+      "title": "IntelliJ Plugin",
+      "subtitle": "Generate a long-lived access token and paste it into the IntelliJ plugin settings.",
+      "copyError": "Failed to copy to clipboard.",
+      "create": {
+        "title": "Generate token",
+        "name": "Token name (optional)",
+        "namePlaceholder": "e.g. IntelliJ on MacBook",
+        "generate": "Generate",
+        "generating": "Generating...",
+        "createError": "Failed to generate token.",
+        "token": "Token (shown once)",
+        "tokenHint": "Copy this token now. You will not be able to view it again.",
+        "createdAt": "Created:"
+      },
+      "tokens": {
+        "title": "Your tokens",
+        "loadError": "Failed to load tokens.",
+        "empty": "No tokens yet.",
+        "unnamed": "Unnamed token",
+        "tokenHintLabel": "Hint:",
+        "createdAt": "Created:",
+        "lastUsedAt": "Last used:",
+        "status": "Status:",
+        "active": "Active",
+        "revoked": "Revoked",
+        "revoke": "Revoke",
+        "revoking": "Revoking...",
+        "revokeError": "Failed to revoke token."
+      }
+    }
+  },
+  "dashboard": {
+    "welcome": "Welcome, {{name}}",
+    "description": "Use the navigation to create tasks, inspect stages, or sync tickets.",
+    "stats": {
+      "projects": "Projects",
+      "repositories": "Repositories",
+      "runningTasks": "Running tasks",
+      "openFindings": "Open findings",
+      "executors": "Executors"
+    },
+    "sections": {
+      "recentTasks": "Recent tasks",
+      "topFindings": "Top findings"
+    },
+    "empty": {
+      "recentTasks": "No recent tasks.",
+      "topFindings": "No open findings."
+    }
+  },
+  "tickets": {
+    "title": "Ticket Management",
+    "subtitle": "Track external tickets opened from findings and SCA issues.",
+    "actions": {
+      "create": "New ticket",
+      "reset": "Reset filters"
+    },
+    "filters": {
+      "title": "Filters",
+      "project": "Project",
+      "provider": "Provider",
+      "status": "Status",
+      "search": "Search",
+      "searchPlaceholder": "Search by external key"
+    },
+    "columns": {
+      "key": "External key",
+      "provider": "Provider",
+      "project": "Project",
+      "status": "Status",
+      "createdAt": "Created at",
+      "actions": "Actions"
+    },
+    "issueTypes": {
+      "bug": "Bug",
+      "task": "Task",
+      "story": "Story"
+    },
+    "draft": {
+      "title": "Draft basket",
+      "count": "{{count}} items",
+      "empty": "Draft basket is empty. Stash items first.",
+      "addSelected": "Stash to ticket",
+      "clear": "Clear",
+      "remove": "Remove",
+      "goFindings": "Go to findings",
+      "titleEn": "Title (EN)",
+      "titleZh": "Title (ZH)",
+      "descEn": "Description (EN)",
+      "descZh": "Description (ZH)"
+    },
+    "ai": {
+      "title": "AI copy",
+      "generate": "AI generate",
+      "polish": "AI polish",
+      "apply": "Apply",
+      "failed": "AI failed:",
+      "preview": "Preview"
+    },
+    "detail": {
+      "title": "Ticket details",
+      "info": "Details",
+      "summary": "Summary",
+      "description": "Description",
+      "findings": "Findings",
+      "scaIssues": "SCA issues",
+      "goSca": "Go to SCA",
+      "raw": "Raw payload"
+    },
+    "dialog": {
+      "title": "Create ticket from draft",
+      "subtitle": "Use your draft basket to create an external ticket.",
+      "provider": "Provider",
+      "issueType": "Issue type",
+      "clearDraftAfter": "Clear draft after creation",
+      "saveDraft": "Save draft",
+      "errors": {
+        "required": "Provider is required.",
+        "emptyDraft": "Draft basket is empty."
+      },
+      "submit": "Create ticket"
+    },
+    "error": "Unable to load tickets.",
+    "empty": "No tickets yet."
+  },
+  "aiClients": {
+    "title": "AI Client Management",
+    "subtitle": "Configure LLM endpoints for automated reviews.",
+    "tabs": {
+      "api": "API Providers",
+      "agents": "Agents",
+      "mcps": "MCP Profiles"
+    },
+    "actions": {
+      "create": "New AI client",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "listTitle": "Configured clients",
+    "columns": {
+      "name": "Name",
+      "provider": "Provider",
+      "model": "Model",
+      "baseUrl": "Base URL",
+      "default": "Default",
+      "enabled": "Enabled",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "title": "Create AI client",
+      "editTitle": "Edit AI client",
+      "subtitle": "Enter the endpoint and authentication data.",
+      "presets": {
+        "title": "Provider presets",
+        "subtitle": "Auto-fill common vendors without copying URLs and model IDs.",
+        "placeholder": "Select a provider",
+        "apply": "Apply preset",
+        "docs": "Docs",
+        "empty": "No presets available.",
+        "error": "Unable to load provider presets.",
+        "regions": {
+          "global": "Global providers",
+          "china": "China mainland"
+        }
+      },
+      "model": "Model",
+      "modelSelectLabel": "Choose a model ({{count}} options)",
+      "modelSelectPlaceholder": "Select a recommended model",
+      "modelSelectHint": "Pick one from the list or enter a custom model below.",
+      "customModelPlaceholder": "Enter a model identifier",
+      "customModelHint": "Supports manual input for private deployments or beta releases.",
+      "apiKey": "API key",
+      "defaultLabel": "Default client",
+      "defaultHint": "Use this client for automated AI review.",
+      "enabledLabel": "Enabled",
+      "enabledHint": "Temporarily disable without deleting.",
+      "errors": {
+        "required": "Name, provider, base URL, and model are required."
+      },
+      "submit": "Save client"
+    },
+    "error": "Unable to load AI client configs.",
+    "empty": "No AI clients configured."
+  },
+  "aiAgents": {
+    "listTitle": "Configured agents",
+    "actions": {
+      "create": "New agent",
+      "upload": "Upload agent"
+    },
+    "columns": {
+      "name": "Name",
+      "kind": "Kind",
+      "stageTypes": "Stage coverage",
+      "mcp": "MCP profile",
+      "enabled": "Enabled",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "title": "Create agent",
+      "editTitle": "Edit agent",
+      "subtitle": "Define how the agent should run and which MCP profile it uses.",
+      "entrypoint": "Custom entrypoint",
+      "stageTypes": "Stage types (comma separated)",
+      "params": "Agent params (JSON)",
+      "errors": {
+        "required": "Name and kind are required.",
+        "params": "Params must be valid JSON."
+      }
+    },
+    "error": "Unable to load AI agents.",
+    "empty": "No agents configured.",
+    "uploadDialog": {
+      "title": "Upload agent plugin",
+      "subtitle": "Upload a ZIP/TAR archive that contains your agent implementation.",
+      "file": "Archive file",
+      "paramsHint": "Optional JSON overrides, e.g. {\"timeout\": 30}",
+      "enabledHint": "Disable to keep the agent available without scheduling.",
+      "submit": "Upload agent",
+      "errors": {
+        "file": "Please choose an archive to upload.",
+        "params": "Params must be valid JSON."
+      }
+    }
+  },
+  "aiMcps": {
+    "listTitle": "Configured MCP profiles",
+    "actions": {
+      "create": "New MCP profile",
+      "upload": "Upload MCP"
+    },
+    "columns": {
+      "name": "Name",
+      "type": "Type",
+      "endpoint": "Endpoint",
+      "entrypoint": "Entrypoint",
+      "enabled": "Enabled",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "title": "Create MCP profile",
+      "editTitle": "Edit MCP profile",
+      "subtitle": "Configure how agents reach this MCP endpoint.",
+      "entrypoint": "Entrypoint",
+      "params": "Connection params (JSON)",
+      "enabledLabel": "Enabled",
+      "enabledHint": "Disable to keep this MCP available but inactive.",
+      "errors": {
+        "required": "Name and type are required.",
+        "params": "Params must be valid JSON."
+      }
+    },
+    "uploadDialog": {
+      "title": "Upload local MCP bundle",
+      "subtitle": "Upload a ZIP/TAR archive that contains your MCP implementation.",
+      "file": "Archive file",
+      "paramsHint": "Optional JSON, e.g. {\"timeout\": 30}",
+      "submit": "Upload MCP",
+      "errors": {
+        "file": "Please choose an archive to upload.",
+        "params": "Params must be valid JSON."
+      }
+    },
+    "error": "Unable to load MCP profiles.",
+    "empty": "No MCP profiles configured."
+  },
+  "aiKnowledge": {
+    "title": "AI Knowledge Base",
+    "subtitle": "Curate runbooks and FAQ entries for RAG-enabled agents.",
+    "listTitle": "Knowledge entries",
+    "actions": {
+      "create": "New entry"
+    },
+    "columns": {
+      "title": "Title",
+      "tags": "Tags",
+      "source": "Source",
+      "updated": "Updated",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "title": "Create knowledge entry",
+      "editTitle": "Edit knowledge entry",
+      "subtitle": "Provide details that agents can retrieve during AI reviews.",
+      "tagsLabel": "Tags",
+      "tagsHint": "Comma separated, e.g. runbook, component:auth",
+      "sourceLabel": "Source link",
+      "bodyLabel": "Content",
+      "errors": {
+        "required": "Title and body are required."
+      },
+      "submit": "Save entry"
+    },
+    "search": {
+      "title": "Search knowledge",
+      "queryLabel": "Question / keywords",
+      "tagsLabel": "Tags filter",
+      "limitLabel": "Top K",
+      "placeholder": "Describe the issue you want the agent to solve",
+      "tagsPlaceholder": "tag-one,tag-two",
+      "submit": "Search",
+      "results": "Search results",
+      "score": "Score: {{score}}",
+      "empty": "No results yet. Add entries or refine the query."
+    },
+    "empty": "No knowledge entries yet.",
+    "error": "Unable to load knowledge entries."
+  },
+  "projects": {
+    "title": "Projects",
+    "subtitle": "Tenant repositories and pipelines",
+    "tableTitle": "Registered projects",
+    "columns": {
+      "name": "Name",
+      "codeOwners": "Code owners",
+      "createdAt": "Created at"
+    },
+    "empty": "No projects yet. Create one via API or seed data.",
+    "error": "Failed to load projects.",
+    "form": {
+      "createTitle": "Create project",
+      "editTitle": "Edit project",
+      "name": "Name",
+      "codeOwners": "Code owners (comma separated)",
+      "save": "Save",
+      "create": "Create"
+    },
+    "actions": {
+      "edit": "Edit",
+      "details": "Details",
+      "cancel": "Cancel",
+      "delete": "Delete"
+    },
+    "detail": {
+      "labels": {
+        "codeOwners": "Code owners",
+        "createdAt": "Created at",
+        "updatedAt": "Updated at",
+        "branch": "Branch"
+      },
+      "actions": {
+        "viewFindings": "View findings",
+        "viewRepoFindings": "Repo findings",
+        "viewSca": "View SCA",
+        "openTaskExplorer": "Task Explorer"
+      },
+      "sections": {
+        "repositories": "Repositories",
+        "tasks": "Recent tasks"
+      },
+      "overview": {
+        "repositories": "Repositories",
+        "tasks": "Tasks",
+        "findings": "Findings",
+        "sca": "SCA issues",
+        "total": "Total",
+        "running": "Running",
+        "open": "Open",
+        "confirmed": "Confirmed"
+      },
+      "columns": {
+        "taskName": "Task name",
+        "taskType": "Type",
+        "taskStatus": "Status",
+        "createdAt": "Created at"
+      },
+      "tasks": {
+        "pageEmpty": "No tasks",
+        "pageRange": "Showing {{start}}-{{end}} / {{total}}"
+      },
+      "empty": {
+        "repositories": "No repositories under this project.",
+        "tasks": "No tasks under this project."
+      },
+      "errors": {
+        "invalidProject": "Missing project id.",
+        "overview": "Unable to load project overview.",
+        "repositories": "Unable to load repositories.",
+        "tasks": "Unable to load tasks."
+      }
+    },
+    "confirmDelete": "Delete project \"{{name}}\"? Existing tasks remain in history, but the project and repositories will be hidden."
+  },
+  "tasks": {
+    "title": "Task Explorer",
+    "subtitle": "Inspect orchestration, source spec, stages, artifacts, and findings for security tasks.",
+    "input": {
+      "label": "Task ID (UUID)",
+      "placeholder": "11111111-2222-3333-4444-555555555555",
+      "button": "Load task"
+    },
+    "filters": {
+      "searchPlaceholder": "Search by name, task ID, reference, or commit"
+    },
+    "actions": {
+      "create": "New task",
+      "assignExecutor": "Assign executor",
+      "reassignExecutor": "Reassign executor",
+      "delete": "Delete task",
+      "confirmDelete": "Delete task \"{{task}}\"? This cancels any running workflow and hides the task."
+    },
+    "createDialog": {
+      "title": "Create task",
+      "subtitle": "Pick a project, task type, and scan source to launch a task.",
+      "project": "Project",
+      "repository": "Repository",
+      "type": "Task type",
+      "engine": "Engine",
+      "executorSelect": "Preferred executor",
+      "executorPlaceholder": "Leave empty to assign later",
+      "semgrepPro": {
+        "label": "Use Semgrep Pro",
+        "description": "Requires a valid Semgrep App Token (expires after 24h).",
+        "token": "Semgrep App Token"
+      },
+      "aiReview": {
+        "label": "Use AI review",
+        "description": "When enabled, Secrux queues AI reviews for open findings during the Result Review stage.",
+        "mode": "Default precision (no data flow)",
+        "dataFlowMode": "Precision when data flow exists",
+        "modes": {
+          "simple": "Simple",
+          "precise": "Precise"
+        }
+      },
+      "scaAiReview": {
+        "label": "Use SCA AI review",
+        "description": "When enabled, Secrux queues AI reviews for SCA issues at the selected severity levels during the Result Review stage."
+      },
+      "name": "Task name",
+      "correlation": "Correlation ID",
+      "owner": "Owner (optional)",
+      "gitSection": "Repository snapshot",
+      "gitSummary": "Default branch: {{branch}} · Latest commit: {{commit}}",
+      "gitEmpty": "No git metadata yet.",
+      "gitRefresh": "Refresh",
+      "refMode": "Reference mode",
+      "refLatest": "Latest commit on default branch",
+      "refBranch": "Specific branch",
+      "refTag": "Specific tag",
+      "refCommit": "Specific commit",
+      "branch": "Branch",
+      "tag": "Tag",
+      "commit": "Commit",
+      "submit": "Create task",
+      "errors": {
+        "project": "Please select a project.",
+        "repository": "Please select a repository.",
+        "name": "Task name is required.",
+        "correlation": "Correlation ID is required.",
+        "branch": "Select a branch.",
+        "tag": "Select a tag.",
+        "commit": "Select a commit.",
+        "noDefaultBranch": "Repository does not expose a default branch yet.",
+        "gitUnknown": "Unknown git reference mode.",
+        "semgrepToken": "Semgrep token is required when enabling Pro scanning.",
+        "aiReviewMode": "Please choose an AI review precision.",
+        "scaAiReviewSeverities": "Select at least one severity level for SCA AI review."
+      }
+    },
+    "assignDialog": {
+      "title": "Assign executor",
+      "subtitle": "Choose which executor should process the task.",
+      "taskLabel": "Task ID",
+      "executor": "Executor",
+      "submit": "Assign",
+      "noTask": "No task selected.",
+      "errors": {
+        "executor": "Please select an executor."
+      }
+    },
+    "details": {
+      "status": "Status",
+      "type": "Type",
+      "project": "Project",
+      "name": "Task name",
+      "correlation": "Correlation ID",
+      "owner": "Owner",
+      "executor": "Executor",
+      "executorUnassigned": "Unassigned",
+      "sourceRefType": "Source ref type",
+      "sourceRef": "Source reference",
+      "commitSha": "Commit SHA",
+      "semgrepPro": "Semgrep Pro",
+      "createdAt": "Created at",
+      "updatedAt": "Updated at"
+    },
+    "logs": {
+      "stageTitle": "Stage logs",
+      "stageSubtitle": "{{type}} · {{status}}",
+      "selectStage": "Select a stage to view logs.",
+      "error": "Unable to load logs.",
+      "empty": "No logs captured for this stage.",
+      "streamError": "Log stream interrupted. Retrying..."
+    },
+    "spec": {
+      "title": "Task specification",
+      "source": {
+        "title": "Source",
+        "gitRepo": "Repository",
+        "gitRef": "Reference",
+        "gitAuth": "Auth",
+        "archiveKey": "Archive key",
+        "archiveUrl": "Archive URL",
+        "url": "URL",
+        "baseline": "Baseline fingerprints"
+      },
+      "ruleSelector": {
+        "title": "Rule selector",
+        "mode": "Mode",
+        "profile": "Profile",
+        "explicit": "Explicit rules"
+      },
+      "policy": {
+        "title": "Policy",
+        "failOn": "Fail on severity",
+        "scanMode": "Scan mode",
+        "parallelism": "Parallelism",
+        "failStrategy": "Fail strategy"
+      },
+      "ticket": {
+        "title": "Ticket automation",
+        "project": "Project",
+        "assignee": "Assignee strategy",
+        "sla": "SLA (days)",
+        "labels": "Labels"
+      }
+    },
+    "stages": {
+      "title": "Stages",
+      "empty": "No stages found for this task.",
+      "columns": {
+        "id": "Stage ID",
+        "type": "Type",
+        "status": "Status",
+        "artifacts": "Artifacts",
+        "started": "Started",
+        "ended": "Ended",
+        "logs": "Logs",
+        "actions": "Actions"
+      },
+      "error": "Failed to load stages.",
+      "actions": {
+        "viewLogs": "View logs",
+        "runResultReview": "Run review",
+        "rerunResultReview": "Re-run review"
+      },
+      "resultReviewDialog": {
+        "title": "Run result review",
+        "subtitle": "Choose whether to use AI review and its precision.",
+        "stageId": "Stage ID",
+        "submit": "Run",
+        "aiReview": {
+          "label": "Use AI review",
+          "description": "If enabled, Secrux queues AI reviews for open findings.",
+          "mode": "Default precision (no data flow)",
+          "dataFlowMode": "Precision when data flow exists"
+        }
+      }
+    },
+    "artifacts": {
+      "title": "Artifacts",
+      "empty": "No artifacts recorded.",
+      "columns": {
+        "id": "Artifact ID",
+        "stage": "Stage",
+        "uri": "URI",
+        "kind": "Kind",
+        "size": "Size",
+        "checksum": "Checksum"
+      },
+      "error": "Failed to load artifacts."
+    },
+    "findings": {
+      "title": "Findings",
+      "empty": "No findings yet.",
+      "columns": {
+        "severity": "Severity",
+        "rule": "Rule ID",
+        "status": "Status",
+        "introducedBy": "Introduced by"
+      },
+      "error": "Failed to load findings."
+    },
+    "errors": {
+      "task": "Failed to load task. Confirm the ID is correct and you have permission."
+    },
+    "listError": "Failed to load tasks.",
+    "listEmpty": "No tasks match these filters."
+  },
+  "rules": {
+    "title": "Rule Management",
+    "subtitle": "Review all custom/static analysis rules registered under the tenant.",
+    "actions": {
+      "create": "New rule"
+    },
+    "columns": {
+      "name": "Name",
+      "engine": "Engine",
+      "severity": "Severity",
+      "scope": "Scope",
+      "langs": "Languages",
+      "tags": "Tags",
+      "enabled": "Enabled"
+    },
+    "empty": "No rules yet.",
+    "error": "Failed to load rules.",
+    "form": {
+      "title": "Create rule",
+      "subtitle": "Define metadata and payload for a new static analysis rule.",
+      "scope": "Scope",
+      "key": "Key",
+      "name": "Name",
+      "engine": "Engine",
+      "langs": "Languages (comma separated)",
+      "severity": "Severity",
+      "tags": "Tags (comma separated)",
+      "pattern": "Pattern JSON",
+      "docs": "Docs JSON (optional)",
+      "enabled": "Enabled",
+      "hash": "Hash",
+      "signature": "Signature (optional)",
+      "submit": "Create rule",
+      "invalidJson": "Invalid JSON content",
+      "serverError": "Failed to create rule: {{message}}",
+      "success": "Rule created."
+    }
+  },
+  "findings": {
+    "title": "Vulnerability Management",
+    "subtitle": "Review, triage, and escalate findings from recent tasks.",
+    "taskList": "Tasks",
+    "projectList": "Projects",
+    "repoList": "Repositories",
+    "scope": {
+      "label": "View",
+      "task": "By task",
+      "project": "By project",
+      "repo": "By repository"
+    },
+    "panelTitle": "Findings for {{task}}",
+    "panelTitleProject": "Findings for {{project}}",
+    "panelTitleRepo": "Findings for {{repo}}",
+    "noneSelected": "Select a task to view findings.",
+    "noneSelectedProject": "Select a project to view findings.",
+    "noneSelectedRepo": "Select a repository to view findings.",
+    "selectTaskHint": "Choose a task from the list to inspect findings.",
+    "selectProjectHint": "Choose a project from the list to inspect findings.",
+    "selectRepoHint": "Choose a repository from the list to inspect findings.",
+    "filters": {
+      "searchPlaceholder": "Search rule ID or engine"
+    },
+    "detailBadge": "CODE",
+    "labels": {
+      "task": "Task",
+      "project": "Project",
+      "repository": "Repository",
+      "createdAt": "Created at"
+    },
+    "columns": {
+      "severity": "Severity",
+      "rule": "Rule ID",
+      "status": "Status",
+      "dataflow": "Data flow",
+      "introducedBy": "Engine",
+      "actions": "Actions",
+      "location": "Issue location"
+    },
+    "actions": {
+      "details": "Details",
+      "aiReview": "AI review",
+      "reviewing": "Reviewing...",
+      "delete": "Delete",
+      "confirmDelete": "Delete this finding? This action only hides the record."
+    },
+    "detailTitle": "Finding {{id}}",
+    "detailSubtitle": "Normalized finding payload",
+    "error": "Unable to load findings.",
+    "empty": "No findings under current filters.",
+    "detailSection": {
+      "related": "Related findings in project",
+      "aiReviewOpinion": "AI review opinion",
+      "code": "Code snippet",
+      "dataflow": "Data flow",
+      "meta": "Details",
+      "noCode": "No code snippet available.",
+      "noDataflow": "No data flow info.",
+      "dataflowNodesOnly": "Only node list is available; no edges provided."
+    },
+    "dataflow": {
+      "clickNodeHint": "Click a node to view its code snippet",
+      "snippetTitle": "Node code snippet",
+      "selectNode": "Select a node with file and line to view code",
+      "path": "Path",
+      "nodes": "nodes",
+      "selected": "Selected",
+      "flowTo": "Flow",
+      "toNext": "to next step",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "location": "Location",
+      "roles": {
+        "SOURCE": "Source",
+        "PROPAGATOR": "Propagator",
+        "SINK": "Sink",
+        "UNKNOWN": "Unknown"
+      },
+      "summary": {
+        "start": "Flow starts at {{value}}",
+        "propagate": "propagates to {{value}}",
+        "end": "and finally reaches {{value}}",
+        "separator": ", ",
+        "punct": "."
+      }
+    },
+    "exportReport": "Export report",
+    "exportTitle": "Report title",
+    "exportTitlePlaceholder": "Secrux Security Report",
+    "exportFormat": "Format",
+    "exportDetail": "Detail level",
+    "exportSummary": "Summary",
+    "exportFull": "Full",
+    "exportInclude": "Include",
+    "exportCode": "Code snippet",
+    "exportDataFlow": "Data flow",
+    "exportScope": "Scope",
+    "exportScopeFinding": "Current finding only",
+    "exportScopeTask": "All findings in this task",
+    "exportLanguage": "Language",
+    "exportScopeProject": "All findings in this project",
+    "exportScopeRepo": "All findings in this repository"
+  },
+  "repositories": {
+    "title": "Repositories",
+    "subtitle": "Connect remote SCM or upload archives for this project.",
+    "empty": "No repositories found.",
+    "columns": {
+      "sourceMode": "Source mode",
+      "remoteUrl": "Remote URL",
+      "scmType": "SCM",
+      "defaultBranch": "Default branch",
+      "secretRef": "Secret",
+      "authMode": "Auth"
+    },
+    "scmLabels": {
+      "github": "GitHub",
+      "gitlab": "GitLab",
+      "gerrit": "Gerrit",
+      "bitbucket": "Bitbucket",
+      "git": "Generic Git"
+    },
+    "form": {
+      "title": "Manage repository",
+      "sourceMode": "Source mode",
+      "remoteUrl": "Remote URL",
+      "scmType": "SCM type",
+      "defaultBranch": "Default branch",
+      "secretRef": "Secret reference",
+      "remoteSection": "Remote Git connection",
+      "remoteHint": "Required when source mode is REMOTE or MIXED.",
+      "uploadSection": "Uploaded archive metadata",
+      "uploadHint": "Required when source mode is UPLOAD or MIXED.",
+      "uploadKey": "Archive key / object storage path",
+      "uploadChecksum": "Checksum (SHA-256)",
+      "uploadSize": "Archive size (bytes)",
+      "selectArchive": "Choose archive",
+      "fileSelected": "Selected {{name}} ({{size}})",
+      "digesting": "Calculating...",
+      "uploadHelper": "Archive uploads to object storage are not available via API yet. Upload the file manually and paste its key. Selecting a file here only helps compute checksum and size locally.",
+      "authSection": "Authentication",
+      "authHint": "Store credentials once and we will use them when cloning the repository.",
+      "authMode": "Authentication mode",
+      "authModes": {
+        "none": "No authentication",
+        "basic": "Username & password",
+        "token": "Personal access token"
+      },
+      "authUsername": "Username",
+      "authPassword": "Password",
+      "authToken": "Access token",
+      "authTokenUser": "Token username (optional)",
+      "authTokenUserPlaceholder": "git",
+      "authStored": "Encrypted credentials are already stored for this repository.",
+      "authReplace": "Replace credentials",
+      "authErrors": {
+        "basic": "Username and password are required for basic authentication.",
+        "token": "Access token is required."
+      },
+      "save": "Save",
+      "editing": "Editing repository {{name}}"
+    },
+    "errors": {
+      "cryptoUnavailable": "Browser does not support Web Crypto API. Please fill the checksum manually."
+    },
+    "actions": {
+      "add": "New repository",
+      "viewList": "Repository list",
+      "back": "Back to list",
+      "edit": "Edit",
+      "delete": "Delete",
+      "update": "Update repository"
+    },
+    "confirmDelete": "Delete repository {{name}}? Credentials and objects are not removed."
+  },
+  "executors": {
+    "title": "Executor Fleet",
+    "subtitle": "Provision, monitor, and dispatch secure runners.",
+    "actions": {
+      "register": "Register executor",
+      "dispatch": "Dispatch",
+      "drain": "Drain",
+      "resume": "Resume",
+      "viewToken": "View token"
+    },
+    "filters": {
+      "title": "Filters",
+      "search": "Search",
+      "status": "Status"
+    },
+    "table": {
+      "name": "Name",
+      "status": "Status",
+      "cpu": "CPU",
+      "memory": "Memory",
+      "labels": "Labels"
+    },
+    "empty": "No executors registered yet.",
+    "status": {
+      "registered": "Registered",
+      "ready": "Ready",
+      "busy": "Busy",
+      "draining": "Draining",
+      "offline": "Offline"
+    },
+    "dialogs": {
+      "registerTitle": "Register executor",
+      "dispatchTitle": "Dispatch task",
+      "dispatchHint": "Send a containerized workload to the selected executor.",
+      "tokenTitle": "Executor token · {{name}}",
+      "tokenHint": "Keep tokens secret. Anyone with this token can connect an agent on your behalf.",
+      "tokenCopy": "Copy token",
+      "tokenCopied": "Copied",
+      "tokenEmpty": "Token unavailable. Refresh the page or reissue the executor."
+    },
+    "form": {
+      "name": "Name",
+      "cpu": "CPU capacity (cores)",
+      "memory": "Memory capacity (MB)",
+      "labels": "Labels (key=value, comma separated)",
+      "executor": "Executor",
+      "taskId": "Task ID",
+      "engine": "Engine",
+      "image": "Container image override (optional)",
+      "imageHint": "Leave blank to use the default image configured for the selected engine on the executor.",
+      "command": "Command",
+      "env": "Environment variables",
+      "cpuLimit": "CPU limit",
+      "memoryLimit": "Memory limit (MB)",
+      "timeout": "Timeout (seconds)",
+      "memoryLimitMb": "Memory limit (MB)"
+    }
+  },
+  "statuses": {
+    "PENDING": "Pending",
+    "RUNNING": "Running",
+    "SUCCEEDED": "Succeeded",
+    "FAILED": "Failed",
+    "CANCELED": "Canceled",
+    "SKIPPED": "Skipped",
+    "OPEN": "Open",
+    "CONFIRMED": "Confirmed",
+    "FALSE_POSITIVE": "False positive",
+    "RESOLVED": "Resolved",
+    "WONT_FIX": "Won't fix",
+    "SYNCED": "Synced"
+  },
+  "taskTypes": {
+    "CODE_CHECK": "Code check",
+    "IDE_AUDIT": "IDE audit",
+    "SCA_CHECK": "SCA check",
+    "SECURITY_SCAN": "Security scan",
+    "SUPPLY_CHAIN": "Supply chain"
+  },
+  "stageTypes": {
+    "SOURCE_PREPARE": "Source prep",
+    "RULES_PREPARE": "Rule prep",
+    "SCAN_EXEC": "Scan execution",
+    "RESULT_PROCESS": "Result processing",
+    "RESULT_REVIEW": "Result review"
+  },
+  "logLevels": {
+    "INFO": "Info",
+    "WARN": "Warning",
+    "ERROR": "Error"
+  },
+  "severities": {
+    "CRITICAL": "Critical",
+    "HIGH": "High",
+    "MEDIUM": "Medium",
+    "LOW": "Low",
+    "INFO": "Info"
+  },
+  "sca": {
+    "title": "SCA Management",
+    "subtitle": "Scan SBOMs, repositories, images, or filesystems for dependency risks.",
+    "actions": {
+      "create": "New SCA task"
+    },
+    "taskListTitle": "SCA tasks",
+    "emptySelection": "Select an SCA task to view details.",
+    "taskInfo": {
+      "createdAt": "Created",
+      "engine": "Engine",
+      "target": "Target",
+      "stages": "Stages"
+    },
+    "dependencyGraph": {
+      "title": "Dependency graph",
+      "empty": "No dependency graph available yet.",
+      "counts": "{{nodes}} nodes · {{edges}} edges",
+      "searchPlaceholder": "Search components…",
+      "noMatches": "No matching components.",
+      "deps": "{{count}} deps",
+      "dependents": "{{count}} dependents",
+      "cycle": "Cyclic",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "directDeps": "Direct dependencies",
+      "directDependents": "Direct dependents",
+      "selectNode": "Select a component to view relationships.",
+      "none": "None",
+      "more": "+{{count}} more"
+    },
+    "sbom": {
+      "title": "SBOM",
+      "show": "Show",
+      "hide": "Hide",
+      "download": "Download SBOM",
+      "downloading": "Downloading...",
+      "downloadError": "Failed to download SBOM.",
+      "error": "Failed to load SBOM.",
+      "empty": "No SBOM available yet."
+    },
+    "issues": {
+      "title": "Issues",
+      "error": "Failed to load issues.",
+      "empty": "No issues yet.",
+      "related": "Other issues in this task",
+      "batch": {
+        "selected": "{{count}} selected",
+        "confirm": "Confirm selected",
+        "apply": "Apply status",
+        "aiReview": "AI review selected",
+        "stash": "Stash selected",
+        "clear": "Clear selection"
+      },
+      "review": {
+        "title": "AI Review",
+        "trigger": "AI Review",
+        "jobStatus": "Job status",
+        "verdict": "Verdict",
+        "confidence": "Confidence",
+        "summary": "Summary",
+        "fixHint": "Fix hint",
+        "empty": "No review yet.",
+        "ai": "AI reviewed",
+        "aiPending": "AI reviewing",
+        "human": "Manually confirmed"
+      },
+      "usage": {
+        "title": "Usage evidence",
+        "snippetTitle": "Code snippet",
+        "selectHint": "Select an entry to view its code snippet.",
+        "snippetError": "Failed to load code snippet.",
+        "error": "Failed to load usage evidence.",
+        "empty": "No usage evidence (not generated or no match)."
+      },
+      "detailError": "Failed to load issue detail.",
+      "detail": {
+        "badge": "SCA",
+        "info": "Details",
+        "cvss": "CVSS",
+        "task": "Task",
+        "project": "Project",
+        "purl": "PURL",
+        "primaryUrl": "Reference",
+        "introducedBy": "Introduced by",
+        "createdAt": "Created",
+        "location": "Location",
+        "summary": "Summary",
+        "description": "Description",
+        "references": "References",
+        "raw": "Raw payload"
+      },
+      "columns": {
+        "vuln": "Vulnerability",
+        "package": "Package",
+        "severity": "Severity",
+        "status": "Status",
+        "review": "Review"
+      }
+    },
+    "createDialog": {
+      "title": "Create SCA task",
+      "subtitle": "Pick a scan target and create an SCA_CHECK task.",
+      "project": "Project",
+      "targetType": "Target",
+      "targetTypes": {
+        "git": "Repository",
+        "archive": "Archive upload (.zip)",
+        "filesystem": "Filesystem path",
+        "image": "Docker image",
+        "sbom": "SBOM upload"
+      },
+      "repository": "Repository",
+      "refMode": "Ref",
+      "refModes": {
+        "latest": "Default branch",
+        "branch": "Branch",
+        "tag": "Tag",
+        "commit": "Commit"
+      },
+      "refValue": "Ref value",
+      "archive": "Source archive (.zip)",
+      "sbom": "SBOM file (CycloneDX JSON)",
+      "upload": "Upload",
+      "filesystemPath": "Filesystem path",
+      "filesystemHint": "Scans a path accessible by the server/executor.",
+      "imageRef": "Image reference",
+      "imageHint": "Example: nginx:latest or my-registry/app:1.0",
+      "correlationId": "Correlation ID",
+      "executor": "Executor (optional)",
+      "submit": "Create",
+      "errors": {
+        "project": "Project is required.",
+        "repository": "Repository is required.",
+        "correlation": "Correlation ID is required.",
+        "noDefaultBranch": "Repository default branch is unknown.",
+        "branch": "Branch is required.",
+        "tag": "Tag is required.",
+        "commit": "Commit sha is required.",
+        "gitUnknown": "Unknown ref selection.",
+        "archiveUpload": "Please upload an archive first.",
+        "sbomUpload": "Please upload an SBOM first.",
+        "filesystemPath": "Filesystem path is required.",
+        "imageRef": "Image reference is required."
+      }
+    }
+  },
+  "common": {
+    "loading": "Loading...",
+    "logout": "Sign out",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving...",
+    "copy": "Copy",
+    "copied": "Copied",
+    "edit": "Edit",
+    "delete": "Delete",
+    "search": "Search",
+    "all": "All",
+    "actions": "Actions",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "selectPlaceholder": "Select...",
+    "yes": "Yes",
+    "no": "No",
+    "refresh": "Refresh",
+    "previous": "Previous",
+    "next": "Next",
+    "pageStatus": "Page {{page}} of {{total}}",
+    "error": "Something went wrong.",
+    "notAvailable": "Not available",
+    "updatedAt": "Updated at",
+    "back": "Back"
+  }
+}
