@@ -34,7 +34,7 @@ jobs:
             goarch: amd64
             ext: ".exe"
             archive: zip
-          - runner: macos-13
+          - runner: macos-12
             goos: darwin
             goarch: amd64
             ext: ""
