@@ -1,0 +1,36 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+  kafka:
+    bootstrap-servers: ${SECRUX_KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:19092}
+
+secrux:
+  crypto:
+    secret: ${SECRUX_CRYPTO_SECRET}
+  auth:
+    mode: KEYCLOAK
+    issuer-uri: http://localhost:8081/realms/secrux
+    audience: secrux-api
+  authz:
+    enabled: false
+
+executor:
+  gateway:
+    enabled: true
+    port: 5155
+    certificate-path: /Users/z5642188/secrux/executor-agent/gateway.crt
+    private-key-path: /Users/z5642188/secrux/executor-agent/gateway.key
+
+server:
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always

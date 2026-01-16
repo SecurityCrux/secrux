@@ -1,0 +1,123 @@
+spring:
+  application:
+    name: secrux-server
+  datasource:
+    url: jdbc:postgresql://localhost:5432/secrux
+    username: secrux
+    password: secrux
+    ai:
+      url: ${SECRUX_AI_DB_URL:jdbc:postgresql://localhost:5432/secrux}
+      username: ${SECRUX_AI_DB_USERNAME:secrux}
+      password: ${SECRUX_AI_DB_PASSWORD:secrux}
+  jooq:
+    sql-dialect: POSTGRES
+  jackson:
+    locale: en_US
+    serialization:
+      write-dates-as-timestamps: false
+  messages:
+    basename: messages
+    encoding: UTF-8
+  mvc:
+    locale-resolver: accept-header
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    locations: classpath:db/migration
+    default-schema: public
+    ai:
+      enabled: true
+      baseline-on-migrate: true
+      baseline-version: 0
+      locations: classpath:db/ai
+      default-schema: public
+      table: flyway_ai_history
+  kafka:
+    # Default to IPv4 on localhost; override via SECRUX_KAFKA_BOOTSTRAP_SERVERS if running elsewhere.
+    bootstrap-servers: ${SECRUX_KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:19092}
+    template:
+      default-topic: secrux.events
+
+secrux:
+  crypto:
+    secret: ${SECRUX_CRYPTO_SECRET}
+  auth:
+    mode: LOCAL
+    issuer-uri: ${SECRUX_AUTH_ISSUER_URI:http://localhost:8081/realms/secrux}
+    audience: ${SECRUX_AUTH_AUDIENCE:secrux-api}
+    tenant-claim: tenant_id
+    user-claim: sub
+    email-claim: email
+    name-claim: preferred_username
+    role-paths:
+      - realm_access.roles
+      - resource_access.secrux-console.roles
+  authz:
+    enabled: ${SECRUX_AUTHZ_ENABLED:false}
+    opa-url: ${SECRUX_AUTHZ_OPA_URL:http://localhost:8181}
+    policy-path: ${SECRUX_AUTHZ_POLICY_PATH:/v1/data/secrux/allow}
+    fail-open: ${SECRUX_AUTHZ_FAIL_OPEN:false}
+    timeout: ${SECRUX_AUTHZ_TIMEOUT:2s}
+  scan:
+    semgrep:
+      executable: semgrep
+      config: auto
+      timeout-seconds: 300
+    trivy:
+      executable: trivy
+      timeout-seconds: 600
+      additional-args: []
+      cache-dir: ${SECRUX_TRIVY_CACHE_DIR:}
+  upload:
+    root: ${SECRUX_UPLOAD_ROOT:build/uploads}
+  workspace:
+    root: build/workspaces
+  executor:
+    dispatch:
+      api-base-url: ${SECRUX_EXECUTOR_API_BASE_URL:http://localhost:8080}
+      default-timeout-seconds: 900
+  ai:
+    service:
+      base-url: ${SECRUX_AI_SERVICE_BASE_URL:http://localhost:5156}
+      token: ${SECRUX_AI_SERVICE_TOKEN:local-dev-token}
+  ticket:
+    providers:
+      - provider: stub
+        name: Stub (Local)
+        enabled: true
+        defaultPolicy:
+          project: AUTO
+          assigneeStrategy: OWNER
+          labels: []
+      - provider: jira
+        name: Jira Cloud
+        enabled: true
+        defaultPolicy:
+          project: AUTO
+          assigneeStrategy: OWNER
+          labels: []
+  keycloak:
+    admin:
+      enabled: ${SECRUX_KEYCLOAK_ADMIN_ENABLED:true}
+      base-url: ${SECRUX_KEYCLOAK_ADMIN_BASE_URL:http://localhost:8081}
+      realm: ${SECRUX_KEYCLOAK_ADMIN_REALM:secrux}
+      client-id: ${SECRUX_KEYCLOAK_ADMIN_CLIENT_ID:secrux-admin}
+      client-secret: ${SECRUX_KEYCLOAK_ADMIN_CLIENT_SECRET:changeme}
+
+server:
+  port: 8080
+  error:
+    include-message: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,info"
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC} %-5level [%thread] %logger{36} requestId=%X{requestId:-} tenantId=%X{tenantId:-} userId=%X{userId:-} correlationId=%X{correlationId:-} taskId=%X{taskId:-} stageType=%X{stageType:-} stageId=%X{stageId:-} httpMethod=%X{httpMethod:-} httpPath=%X{httpPath:-} - %msg%n"
