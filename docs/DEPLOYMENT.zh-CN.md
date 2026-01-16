@@ -3,7 +3,7 @@
 [English](DEPLOYMENT.md)
 
 > 本文面向“把 Secrux 跑起来并可用”的场景，覆盖开发/测试/生产的推荐部署方式、依赖组件、端口规划、验证与常见问题。  
-> 若只想快速在本机跑后端依赖，可先看 `docs/STARTUP.zh-CN.md`（但请注意：后端 Gradle Wrapper 实际位于 `secrux-server/gradlew`）。
+> 若只想快速在本机跑后端依赖，可先看 `docs/STARTUP.zh-CN.md`（但请注意：后端 Gradle Wrapper 实际位于 `apps/server/gradlew`）。
 
 ## 1. 项目目的与作用（你在部署什么）
 
@@ -26,12 +26,12 @@ Secrux 是一个“可审计、可扩展、支持多租户”的安全扫描平�
 
 | 组件 | 目录 | 作用 | 运行形态 |
 |---|---|---|---|
-| 控制面 API | `secrux-server/` | 认证鉴权、任务编排、结果入库、对外 REST API、Executor 网关 | Spring Boot（JDK 21） |
-| 控制台 UI | `secrux-web/` | 页面与交互（任务/日志/结果/AI 配置等） | Vite + React（构建后静态资源） |
-| 执行机 Agent | `secrux-executor/` | 连接 Executor Gateway，接收任务并拉起扫描引擎容器，上报日志/结果 | Go 二进制 + Docker |
-| 扫描引擎/脚本 | `secrux-engine/` | Semgrep/Trivy 等引擎镜像与运行脚本 | Docker 镜像/脚本 |
-| AI 微服务 | `secrux-ai/` | AI Job、Agent/MCP、Knowledge Base（RAG） | FastAPI + Postgres |
-| 单机快速启动栈 | `docker-compose.yml` | Postgres/Kafka/Redis/Keycloak + `secrux-server` + 控制台（容器名 `secrux-console`）+ `secrux-ai` | Docker Compose |
+| 控制面 API | `apps/server/` | 认证鉴权、任务编排、结果入库、对外 REST API、Executor 网关 | Spring Boot（JDK 21） |
+| 控制台 UI | `apps/web/` | 页面与交互（任务/日志/结果/AI 配置等） | Vite + React（构建后静态资源） |
+| 执行机 Agent | `apps/executor/` | 连接 Executor Gateway，接收任务并拉起扫描引擎容器，上报日志/结果 | Go 二进制 + Docker |
+| 扫描引擎/脚本 | `apps/engines/` | Semgrep/Trivy 等引擎镜像与运行脚本 | Docker 镜像/脚本 |
+| AI 微服务 | `apps/ai/` | AI Job、Agent/MCP、Knowledge Base（RAG） | FastAPI + Postgres |
+| 单机快速启动栈 | `docker/docker-compose.yml` | Postgres/Kafka/Redis/Keycloak + `secrux-server` + 控制台（容器名 `secrux-console`）+ `secrux-ai` | Docker Compose |
 
 ### 2.2 数据与调用链（高层）
 
@@ -49,7 +49,7 @@ Console  --(REST/JWT)-->  secrux-server  --(SQL)--> Postgres
 
 ## 3. 端口、域名与网络要求
 
-### 3.1 默认端口（本仓库 `docker-compose.yml`）
+### 3.1 默认端口（本仓库 `docker/docker-compose.yml`）
 
 | 服务 | 端口 | 说明 |
 |---|---:|---|
@@ -80,28 +80,28 @@ Console  --(REST/JWT)-->  secrux-server  --(SQL)--> Postgres
 
 - Docker + Docker Compose
 - JDK 21
-- Node.js 18+（用于 `secrux-web`）
-- Go 1.22+（用于 `secrux-executor`）
+- Node.js 18+（用于 `apps/web`）
+- Go 1.22+（用于 `apps/executor`）
 
 ### 4.2 启动依赖（Postgres/Kafka/Redis/Keycloak/AI）
 
 在仓库根目录：
 
 ```bash
-docker compose up -d postgres redis zookeeper kafka keycloak
+docker compose -f docker/docker-compose.yml up -d postgres redis zookeeper kafka keycloak
 # 可选（需要 AI 服务时再启动）：
-# docker compose up -d ai-postgres ai-service
-docker compose ps
+# docker compose -f docker/docker-compose.yml up -d ai-postgres ai-service
+docker compose -f docker/docker-compose.yml ps
 ```
 
 > 如需“一键全栈启动”（控制面 + 控制台 + AI），请看仓库根目录的 `README.md`。
 
 ### 4.3 启动后端 API（Spring Boot）
 
-在 `secrux-server/`：
+在 `apps/server/`：
 
 ```bash
-cd secrux-server
+cd apps/server
 ./gradlew flywayMigrate
 SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 ```
@@ -114,15 +114,15 @@ SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 
 ### 4.4 启动控制台（Vite Dev Server）
 
-在 `secrux-web/`：
+在 `apps/web/`：
 
 ```bash
-cd secrux-web
+cd apps/web
 npm install
 npm run dev
 ```
 
-控制台配置（本地默认值可不配；需要覆盖时写到 `secrux-web/.env.local`）：
+控制台配置（本地默认值可不配；需要覆盖时写到 `apps/web/.env.local`）：
 
 - `VITE_API_BASE_URL`（默认 `http://localhost:8080`）
 - `VITE_OIDC_BASE_URL`（默认 `http://localhost:8081`）
@@ -133,7 +133,7 @@ npm run dev
 
 `docs/STARTUP.zh-CN.md` 里提供了可直接复制的 curl 示例。默认 dev realm 中内置了 `secrux/secrux` 的账号与 `secrux-api` 客户端。
 
-### 4.6 注册 Executor 并启动执行机（secrux-executor）
+### 4.6 注册 Executor 并启动执行机（apps/executor）
 
 1) 注册 executor（需要管理员权限的 Bearer Token）：
 
@@ -156,44 +156,44 @@ curl "http://localhost:8080/executors/<executorId>/token" \
   -H "Authorization: Bearer $KC_TOKEN"
 ```
 
-2) 准备执行机配置文件：优先复制 `secrux-executor/config.temp`，把 token 与网关地址填进去（不要提交真实 token）：
+2) 准备执行机配置文件：优先复制 `apps/executor/config.temp`，把 token 与网关地址填进去（不要提交真实 token）：
 
 ```bash
-cp secrux-executor/config.temp /tmp/secrux-agent.json
+cp apps/executor/config.temp /tmp/secrux-agent.json
 ```
 
 3) 启动 executor-agent（需要本机 Docker Engine，可访问 `/var/run/docker.sock`）：
 
 ```bash
-cd secrux-executor
+cd apps/executor
 go build -o executor-agent .
 ./executor-agent -config /tmp/secrux-agent.json
 ```
 
 4) 引擎镜像准备（可选）
 
-- 如果你希望使用本地镜像（与 `secrux-executor/config.json` 的示例一致），可在 `secrux-engine/` 构建：
+- 如果你希望使用本地镜像（与 `apps/executor/config.json` 的示例一致），可在 `apps/engines/` 构建：
 
 ```bash
-docker build -t secrux/semgrep:local -f secrux-engine/Dockerfile secrux-engine
-docker build -t secrux/trivy:local -f secrux-engine/Dockerfile.trivy secrux-engine
+docker build -t secrux/semgrep:local -f apps/engines/Dockerfile.semgrep apps/engines
+docker build -t secrux/trivy:local -f apps/engines/Dockerfile.trivy apps/engines
 ```
 
 > 生产建议使用受控镜像仓库（例如 `ghcr.io/...` 或企业私有 Harbor），并通过 `engineImages` 显式映射。
 
 ## 5. 单机/测试环境部署（无 K8s）
 
-仓库根目录的 `docker-compose.yml` 可用于“单机快速启动”全栈（含 UI/AI）。在测试环境中也可以只启动其中的基础设施服务（Postgres/Kafka/Keycloak 等），然后将各模块按以下方式部署：
+仓库内的 `docker/docker-compose.yml` 可用于“单机快速启动”全栈（含 UI/AI）。在测试环境中也可以只启动其中的基础设施服务（Postgres/Kafka/Keycloak 等），然后将各模块按以下方式部署：
 
-- `secrux-server`：构建 fat jar，以 systemd 或容器运行。
-- `secrux-web`：`npm run build` 后产出静态资源，交给 Nginx/Caddy/S3 静态托管。
-- `secrux-executor`：安装为 systemd 服务（需要宿主机 Docker Engine）。
-- `secrux-ai`：可继续沿用 compose 中的 `ai-service` 方式，或按企业规范部署到独立主机/容器平台。
+- `apps/server`：构建 fat jar，以 systemd 或容器运行。
+- `apps/web`：`npm run build` 后产出静态资源，交给 Nginx/Caddy/S3 静态托管。
+- `apps/executor`：安装为 systemd 服务（需要宿主机 Docker Engine）。
+- `apps/ai`：可继续沿用 compose 中的 `ai-service` 方式，或按企业规范部署到独立主机/容器平台。
 
-### 5.1 构建 `secrux-server`
+### 5.1 构建 `apps/server`
 
 ```bash
-cd secrux-server
+cd apps/server
 ./gradlew test
 ./gradlew bootJar
 ls -la build/libs
@@ -205,15 +205,15 @@ ls -la build/libs
 java -jar build/libs/secrux-server-*.jar
 ```
 
-### 5.2 构建 `secrux-web`
+### 5.2 构建 `apps/web`
 
 ```bash
-cd secrux-web
+cd apps/web
 npm ci
 npm run build
 ```
 
-将 `secrux-web/dist/` 部署为静态站点；生产环境建议通过反向代理统一域名与 HTTPS。
+将 `apps/web/dist/` 部署为静态站点；生产环境建议通过反向代理统一域名与 HTTPS。
 
 ## 6. 生产部署建议（关键点清单）
 
@@ -243,7 +243,7 @@ npm run build
 
 ## 7. 部署后验证清单（建议按顺序）
 
-1. `docker compose ps`：依赖服务健康。
+1. `docker compose -f docker/docker-compose.yml ps`：依赖服务健康。
 2. `GET http://<api>/actuator/health`：控制面健康。
 3. `GET http://<ai>/health`：AI service 健康。
 4. Keycloak 登录与获取 token 正常（Console 可跳转登录）。
@@ -252,7 +252,7 @@ npm run build
 
 ## 8. 常见问题（Troubleshooting）
 
-- **后端命令找不到 `./gradlew`**：请在 `secrux-server/` 目录执行（Wrapper 位于 `secrux-server/gradlew`）。
+- **后端命令找不到 `./gradlew`**：请在 `apps/server/` 目录执行（Wrapper 位于 `apps/server/gradlew`）。
 - **executor-agent 无法连接 5155**：确认后端启用了 `executor.gateway.enabled=true`（本地 profile 已启用），并检查防火墙/证书配置。
 - **executor-agent 下载 upload 失败**：检查 `SECRUX_EXECUTOR_API_BASE_URL` 是否为执行机可达地址；以及 `X-Executor-Token` 是否匹配平台下发的 token。
 - **仓库克隆需要凭证**：请在“Repository”对话框里选择 BASIC/TOKEN 并填写；平台会加密存储并在下发任务时提供给执行机。

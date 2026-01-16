@@ -4,25 +4,15 @@ Thanks for contributing to Secrux!
 
 ## Repository setup
 
-This repo uses Git submodules for core modules:
-
-```bash
-git clone --recurse-submodules <YOUR_REPO_URL>
-```
-
-If you already cloned without submodules:
-
-```bash
-git submodule update --init --recursive
-```
+Clone the repo and install toolchains as needed for each module.
 
 ## Development
 
-- `secrux-server` (Kotlin/Spring Boot): `./gradlew bootRun`, `./gradlew test`
-- `secrux-web` (Vite/React): `npm install`, `npm run dev`, `npm run build`
-- `secrux-ai` (Python/FastAPI): see `secrux-ai/README.md`
-- `secrux-executor` (Go): `go test ./...`, `go build`
-- `secrux-engine` (engine images/scripts): see `secrux-engine/README.md`
+- `apps/server` (Kotlin/Spring Boot): `./gradlew bootRun`, `./gradlew test`
+- `apps/web` (Vite/React): `npm install`, `npm run dev`, `npm run build`
+- `apps/ai` (Python/FastAPI): see `apps/ai/README.md`
+- `apps/executor` (Go): `go test ./...`, `go build`
+- `apps/engines` (engine images/scripts): see `apps/engines/README.md`
 
 ## Pull requests
 

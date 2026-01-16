@@ -13,20 +13,20 @@ For full-stack deployment (console + executors + AI service) and configuration s
 
 - Docker & Docker Compose
 - JDK 21 (ensure `java -version` shows 21)
-- `secrux-server/gradlew` executable (already generated in the repo)
+- `apps/server/gradlew` executable (already generated in the repo)
 
 ## 2. Start Infra Dependencies
 
 From the repository root:
 
 ```bash
-docker compose up -d postgres redis zookeeper kafka keycloak
+docker compose -f docker/docker-compose.yml up -d postgres redis zookeeper kafka keycloak
 ```
 
 Optional (AI service + its Postgres):
 
 ```bash
-docker compose up -d ai-postgres ai-service
+docker compose -f docker/docker-compose.yml up -d ai-postgres ai-service
 ```
 
 For full-stack quickstart (server + console + AI), see `README.md`.
@@ -46,7 +46,7 @@ Services provisioned (infra):
 You can inspect container health:
 
 ```bash
-docker compose ps
+docker compose -f docker/docker-compose.yml ps
 ```
 
 ## 3. Run Database Migrations
@@ -54,7 +54,7 @@ docker compose ps
 Once Postgres is healthy:
 
 ```bash
-cd secrux-server
+cd apps/server
 ./gradlew flywayMigrate
 ```
 
@@ -96,7 +96,7 @@ The dev realm ships with a seeded tenant/user that matches the backend defaults:
 | Password | `secrux` |
 | Tenant UUID | `4223be89-773e-4321-9531-833fc1cb77af` |
 
-1. Ensure `docker compose up -d keycloak` is running (it is already part of the blanket `docker compose up -d` command).
+1. Ensure `docker compose -f docker/docker-compose.yml up -d keycloak` is running (it is already part of the blanket `docker compose -f docker/docker-compose.yml up -d` command).
 2. Request a token via the Direct Access Grant flow:
 
 ```bash
@@ -138,14 +138,14 @@ You can override connection details if needed:
 ## 8. Shutting Down
 
 ```bash
-docker compose down
+docker compose -f docker/docker-compose.yml down
 ```
 
 If you need a clean reset (e.g., after squashing Flyway migrations), remove volumes too:
 
 ```bash
-docker compose down -v
-docker compose up -d
+docker compose -f docker/docker-compose.yml down -v
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 Add `-v` if you want to remove Postgres data volume.

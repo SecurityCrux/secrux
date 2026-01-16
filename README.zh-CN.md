@@ -19,25 +19,11 @@ Secrux 是一个支持多租户、可单机部署的安全治理平台。
 
 核心组件清晰拆分为：
 
-- **控制面**（`secrux-server`）：认证/鉴权、任务编排、结果入库、Executor Gateway。
-- **控制台**（`secrux-web`）：Web UI（部署时由独立 Nginx 容器提供静态站点）。
-- **执行机**（`secrux-executor`）：Go **二进制**，连接网关、拉起引擎容器并上报日志/结果。
-- **扫描引擎**（`secrux-engine`）：Semgrep/Trivy 等引擎镜像与运行脚本。
-- **AI 服务**（`secrux-ai`）：FastAPI 微服务，提供 AI Job/MCP/Agent/知识库等能力。
-
-## 拉取所有子项目（Git submodule）
-
-本仓库使用 Git submodule 管理核心模块。推荐使用以下方式拉取：
-
-```bash
-git clone --recurse-submodules <YOUR_REPO_URL>
-```
-
-如果你已经克隆但忘记加 submodule：
-
-```bash
-git submodule update --init --recursive
-```
+- **控制面**（`apps/server`）：认证/鉴权、任务编排、结果入库、Executor Gateway。
+- **控制台**（`apps/web`）：Web UI（部署时由独立 Nginx 容器提供静态站点）。
+- **执行机**（`apps/executor`）：Go **二进制**，连接网关、拉起引擎容器并上报日志/结果。
+- **扫描引擎**（`apps/engines`）：Semgrep/Trivy 等引擎镜像与运行脚本。
+- **AI 服务**（`apps/ai`）：FastAPI 微服务，提供 AI Job/MCP/Agent/知识库等能力。
 
 ## 单机快速启动（Quickstart）
 
@@ -50,15 +36,15 @@ cp .env.example .env
 2. 一键启动全栈（基础设施 + 控制面 + 控制台 + AI）：
 
 ```bash
-docker compose up -d
-docker compose ps
+docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.yml ps
 ```
 
 2.1.（可选，推荐给远端执行机）为 Executor Gateway 生成 TLS 证书（让执行机可保持 `insecure=false` 进行校验）：
 
 ```bash
-./gen-executor-gateway-certs.sh
-docker compose up -d --force-recreate secrux-server
+./scripts/gen-executor-gateway-certs.sh
+docker compose -f docker/docker-compose.yml up -d --force-recreate secrux-server
 ```
 
 3. 访问地址：
@@ -73,7 +59,7 @@ docker compose up -d --force-recreate secrux-server
 4.（可选）在同一台机器启动一个执行机：
 
 ```bash
-cd secrux-executor
+cd apps/executor
 cp .env.example .env
 go build -o executor-agent .
 cp config.temp config.json
@@ -81,7 +67,7 @@ cp config.temp config.json
 ./executor-agent -config ./config.json
 ```
 
-TLS/CA 证书/Token 等细节见 `secrux-executor/README.zh-CN.md`。
+TLS/CA 证书/Token 等细节见 `apps/executor/README.zh-CN.md`。
 
 ## 配置说明
 
@@ -119,7 +105,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-3. 执行机节点（按“二进制”部署，agent 本身不需要 Docker 容器）：`secrux-executor/README.zh-CN.md`
+3. 执行机节点（按“二进制”部署，agent 本身不需要 Docker 容器）：`apps/executor/README.zh-CN.md`
 
 ## 更多文档
 

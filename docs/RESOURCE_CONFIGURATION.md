@@ -9,12 +9,12 @@
 
 | Scope | Where to configure | Typical usage |
 |---|---|---|
-| Control plane (Spring Boot) | `secrux-server/src/main/resources/application.yml` + environment variable overrides | DB/Kafka/Auth/AI/Executor/storage paths, etc. |
-| Console (Vite) | `secrux-web/.env.local` or inject `VITE_*` | API base URL, OIDC params |
+| Control plane (Spring Boot) | `apps/server/src/main/resources/application.yml` + environment variable overrides | DB/Kafka/Auth/AI/Executor/storage paths, etc. |
+| Console (Vite) | `apps/web/.env.local` or inject `VITE_*` | API base URL, OIDC params |
 | AI service (FastAPI) | repo root `.env` (compose) or injected environment variables | ai-service token, DB, LLM, RAG, debugging |
-| Executor (Go) | `secrux-executor/config.temp` (template) + `-config` | gateway, token, engine images, Trivy behavior |
+| Executor (Go) | `apps/executor/config.temp` (template) + `-config` | gateway, token, engine images, Trivy behavior |
 
-## 2. Control-plane key configuration (`secrux-server`)
+## 2. Control-plane key configuration (`apps/server`)
 
 ### 2.1 Required (production must set)
 
@@ -57,7 +57,7 @@ Important: `SECRUX_AI_DB_*` is **not** the same as `secrux-ai`’s `AI_DATABASE_
 
 ### 2.4 Executor Gateway (built into the control plane)
 
-The local profile enables the gateway via `executor.gateway.*` (see `secrux-server/src/main/resources/application-local.yml`).
+The local profile enables the gateway via `executor.gateway.*` (see `apps/server/src/main/resources/application-local.yml`).
 
 | Property | Environment variable | Notes |
 |---|---|---|
@@ -66,7 +66,7 @@ The local profile enables the gateway via `executor.gateway.*` (see `secrux-serv
 | `executor.gateway.certificate-path` / `private-key-path` | `EXECUTOR_GATEWAY_CERTIFICATE_PATH` / `EXECUTOR_GATEWAY_PRIVATE_KEY_PATH` | PEM certificate/key; when missing, server may generate a self-signed cert (dev only) |
 | `executor.gateway.max-frame-bytes` | `EXECUTOR_GATEWAY_MAX_FRAME_BYTES` | Max frame size (default 5 MiB) |
 
-## 3. AI service configuration (`secrux-ai` / `ai-service`)
+## 3. AI service configuration (`apps/ai` / `ai-service`)
 
 | Environment variable | Default/example | Notes |
 |---|---|---|
@@ -76,7 +76,7 @@ The local profile enables the gateway via `executor.gateway.*` (see `secrux-serv
 | `AI_RAG_PROVIDER` | `local` / `ragflow` | Knowledge Base backend (see `docs/ragflow-switch-guide.md`) |
 | `SECRUX_AI_PROMPT_DUMP*` | see repo `.env` | Prompt dump for debugging (disable or strictly control in production) |
 
-## 4. Console configuration (`secrux-web`)
+## 4. Console configuration (`apps/web`)
 
 | Env var | Default (code fallback) | Notes |
 |---|---|---|
@@ -87,9 +87,9 @@ The local profile enables the gateway via `executor.gateway.*` (see `secrux-serv
 | `VITE_OIDC_SCOPE` | `openid` | scope |
 | `VITE_APP_VERSION` | `dev` | UI version display/telemetry |
 
-## 5. Executor configuration (`secrux-executor`)
+## 5. Executor configuration (`apps/executor`)
 
-Start from `secrux-executor/config.temp` (the template contains field comments). Core fields:
+Start from `apps/executor/config.temp` (the template contains field comments). Core fields:
 
 | Field | Notes |
 |---|---|
@@ -142,7 +142,7 @@ The numbers below are **starting points**, not limits. Actual usage depends heav
 
 - Trivy/Semgrep may trigger heavy outbound network traffic. Recommend:
   - Pre-pull images and persist Trivy DB/cache.
-  - Mount Maven cache/settings (see Trivy options in `secrux-executor`).
+  - Mount Maven cache/settings (see Trivy options in `apps/executor`).
   - Enforce CPU/memory limits for engine containers (`cpuLimit`/`memoryLimitMb` from task payload).
 
 ### 7.4 AI service

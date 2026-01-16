@@ -9,12 +9,12 @@
 
 | 范围 | 入口 | 典型用途 |
 |---|---|---|
-| 控制面（Spring Boot） | `secrux-server/src/main/resources/application.yml` + 环境变量覆盖 | DB/Kafka/Auth/AI/Executor/存储路径等 |
-| 控制台（Vite） | `secrux-web/.env.local` 或部署时注入 `VITE_*` | API base、OIDC 参数 |
+| 控制面（Spring Boot） | `apps/server/src/main/resources/application.yml` + 环境变量覆盖 | DB/Kafka/Auth/AI/Executor/存储路径等 |
+| 控制台（Vite） | `apps/web/.env.local` 或部署时注入 `VITE_*` | API base、OIDC 参数 |
 | AI 服务（FastAPI） | 根目录 `.env`（compose）或部署时注入环境变量 | ai-service token、DB、LLM、RAG、调试 |
-| 执行机（Go） | `secrux-executor/config.temp`（模板）+ `-config` | gateway、token、引擎镜像、Trivy 行为 |
+| 执行机（Go） | `apps/executor/config.temp`（模板）+ `-config` | gateway、token、引擎镜像、Trivy 行为 |
 
-## 2. 控制面关键配置（secrux-server）
+## 2. 控制面关键配置（apps/server）
 
 ### 2.1 必配（生产必须设置）
 
@@ -57,7 +57,7 @@
 
 ### 2.4 Executor Gateway（控制面内置）
 
-本地 profile 通过 `executor.gateway.*` 启用网关（见 `secrux-server/src/main/resources/application-local.yml`）。
+本地 profile 通过 `executor.gateway.*` 启用网关（见 `apps/server/src/main/resources/application-local.yml`）。
 
 | 配置项 | 环境变量写法 | 说明 |
 |---|---|---|
@@ -66,7 +66,7 @@
 | `executor.gateway.certificate-path` / `private-key-path` | `EXECUTOR_GATEWAY_CERTIFICATE_PATH` / `EXECUTOR_GATEWAY_PRIVATE_KEY_PATH` | PEM 证书与私钥；缺失时服务端会生成自签（dev 用） |
 | `executor.gateway.max-frame-bytes` | `EXECUTOR_GATEWAY_MAX_FRAME_BYTES` | 单帧最大大小（默认 5 MiB） |
 
-## 3. AI 服务关键配置（secrux-ai / ai-service）
+## 3. AI 服务关键配置（apps/ai / ai-service）
 
 | 环境变量 | 默认/示例 | 说明 |
 |---|---|---|
@@ -76,7 +76,7 @@
 | `AI_RAG_PROVIDER` | `local` / `ragflow` | Knowledge Base 检索后端选择（见 `docs/ragflow-switch-guide.zh-CN.md`） |
 | `SECRUX_AI_PROMPT_DUMP*` | 见根目录 `.env` | 调试用 prompt dump（生产建议关闭或严格控制） |
 
-## 4. 控制台关键配置（secrux-web）
+## 4. 控制台关键配置（apps/web）
 
 | 环境变量 | 默认值（代码 fallback） | 说明 |
 |---|---|---|
@@ -87,9 +87,9 @@
 | `VITE_OIDC_SCOPE` | `openid` | scope |
 | `VITE_APP_VERSION` | `dev` | 页面显示版本/埋点用 |
 
-## 5. 执行机配置（secrux-executor）
+## 5. 执行机配置（apps/executor）
 
-配置文件建议从 `secrux-executor/config.temp` 复制（模板中已包含字段说明），核心字段：
+配置文件建议从 `apps/executor/config.temp` 复制（模板中已包含字段说明），核心字段：
 
 | 字段 | 说明 |
 |---|---|
@@ -142,7 +142,7 @@
 
 - Trivy/Semgrep 都可能触发大量网络访问；建议：
   - 预拉取镜像与 DB 缓存（Trivy cache 持久化）。
-  - 挂载 Maven 缓存与 settings（见 `secrux-executor` 的 trivy 配置）。
+  - 挂载 Maven 缓存与 settings（见 `apps/executor` 的 trivy 配置）。
   - 为引擎容器设置 CPU/内存上限（平台下发的 `cpuLimit/memoryLimitMb`）。
 
 ### 7.4 AI Service

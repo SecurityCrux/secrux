@@ -13,20 +13,20 @@
 
 - Docker 与 Docker Compose
 - JDK 21（确保 `java -version` 显示 21）
-- `secrux-server/gradlew` 可执行（仓库已自带）
+- `apps/server/gradlew` 可执行（仓库已自带）
 
 ## 2. 启动基础设施依赖
 
 在仓库根目录执行：
 
 ```bash
-docker compose up -d postgres redis zookeeper kafka keycloak
+docker compose -f docker/docker-compose.yml up -d postgres redis zookeeper kafka keycloak
 ```
 
 可选（AI 服务 + AI Postgres）：
 
 ```bash
-docker compose up -d ai-postgres ai-service
+docker compose -f docker/docker-compose.yml up -d ai-postgres ai-service
 ```
 
 如需一键启动全栈（后端 + 控制台 + AI），请参考仓库根目录 `README.zh-CN.md`。
@@ -46,7 +46,7 @@ docker compose up -d ai-postgres ai-service
 你可以查看容器健康状态：
 
 ```bash
-docker compose ps
+docker compose -f docker/docker-compose.yml ps
 ```
 
 ## 3. 运行数据库迁移
@@ -54,7 +54,7 @@ docker compose ps
 当 Postgres 健康后执行：
 
 ```bash
-cd secrux-server
+cd apps/server
 ./gradlew flywayMigrate
 ```
 
@@ -96,7 +96,7 @@ dev realm 内置了与后端默认配置匹配的租户与用户：
 | 密码 | `secrux` |
 | Tenant UUID | `4223be89-773e-4321-9531-833fc1cb77af` |
 
-1. 确认 Keycloak 已启动：`docker compose up -d keycloak`（通常已包含在 `docker compose up -d` 中）。
+1. 确认 Keycloak 已启动：`docker compose -f docker/docker-compose.yml up -d keycloak`（通常已包含在 `docker compose -f docker/docker-compose.yml up -d` 中）。
 2. 使用 Direct Access Grant 获取 token：
 
 ```bash
@@ -138,14 +138,14 @@ curl -H "Authorization: Bearer $KC_TOKEN" http://localhost:8080/projects
 ## 8. 停止与清理
 
 ```bash
-docker compose down
+docker compose -f docker/docker-compose.yml down
 ```
 
 如果需要完全重置（例如合并/重做 Flyway 迁移后），也可以删除 volumes：
 
 ```bash
-docker compose down -v
-docker compose up -d
+docker compose -f docker/docker-compose.yml down -v
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 使用 `-v` 会删除 Postgres 数据卷。

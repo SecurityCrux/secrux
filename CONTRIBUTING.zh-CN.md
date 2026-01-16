@@ -4,25 +4,15 @@
 
 ## 仓库拉取
 
-本仓库使用 Git submodule 管理核心模块：
-
-```bash
-git clone --recurse-submodules <YOUR_REPO_URL>
-```
-
-如果你已经克隆但忘记初始化 submodule：
-
-```bash
-git submodule update --init --recursive
-```
+直接克隆仓库，并按模块安装对应的开发工具链即可。
 
 ## 开发与测试
 
-- `secrux-server`（Kotlin/Spring Boot）：`./gradlew bootRun`、`./gradlew test`
-- `secrux-web`（Vite/React）：`npm install`、`npm run dev`、`npm run build`
-- `secrux-ai`（Python/FastAPI）：参考 `secrux-ai/README.zh-CN.md`
-- `secrux-executor`（Go）：`go test ./...`、`go build`
-- `secrux-engine`（引擎镜像/脚本）：参考 `secrux-engine/README.zh-CN.md`
+- `apps/server`（Kotlin/Spring Boot）：`./gradlew bootRun`、`./gradlew test`
+- `apps/web`（Vite/React）：`npm install`、`npm run dev`、`npm run build`
+- `apps/ai`（Python/FastAPI）：参考 `apps/ai/README.zh-CN.md`
+- `apps/executor`（Go）：`go test ./...`、`go build`
+- `apps/engines`（引擎镜像/脚本）：参考 `apps/engines/README.zh-CN.md`
 
 ## PR 提交建议
 

@@ -19,25 +19,11 @@ Highlights:
 
 Core modules:
 
-- **Control plane** (`secrux-server`): AuthN/AuthZ, task orchestration, results storage, Executor Gateway.
-- **Console** (`secrux-web`): Web UI (served by an Nginx container in deployment).
-- **Executor** (`secrux-executor`): A Go **binary** that connects to the gateway, runs engine containers, and uploads logs/results.
-- **Engines** (`secrux-engine`): Semgrep/Trivy engine images and run scripts.
-- **AI service** (`secrux-ai`): FastAPI service for AI jobs, MCPs, agents, and knowledge base.
-
-## Clone (with submodules)
-
-This repo uses Git submodules for the core modules. Clone with:
-
-```bash
-git clone --recurse-submodules <YOUR_REPO_URL>
-```
-
-If you already cloned without submodules:
-
-```bash
-git submodule update --init --recursive
-```
+- **Control plane** (`apps/server`): AuthN/AuthZ, task orchestration, results storage, Executor Gateway.
+- **Console** (`apps/web`): Web UI (served by an Nginx container in deployment).
+- **Executor** (`apps/executor`): A Go **binary** that connects to the gateway, runs engine containers, and uploads logs/results.
+- **Engines** (`apps/engines`): Semgrep/Trivy engine images and run scripts.
+- **AI service** (`apps/ai`): FastAPI service for AI jobs, MCPs, agents, and knowledge base.
 
 ## Quickstart (single machine)
 
@@ -50,15 +36,15 @@ cp .env.example .env
 2. Start the full stack (infra + server + console + AI):
 
 ```bash
-docker compose up -d
-docker compose ps
+docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.yml ps
 ```
 
 2.1. (Optional, recommended for remote executors) Generate TLS certs for the Executor Gateway (so executors can run with `insecure=false`):
 
 ```bash
-./gen-executor-gateway-certs.sh
-docker compose up -d --force-recreate secrux-server
+./scripts/gen-executor-gateway-certs.sh
+docker compose -f docker/docker-compose.yml up -d --force-recreate secrux-server
 ```
 
 3. Open:
@@ -73,7 +59,7 @@ Tip (server deploy): set `CONSOLE_PORT=80` in `.env` and open `http://<host>/`.
 4. (Optional) Run an executor on the same machine:
 
 ```bash
-cd secrux-executor
+cd apps/executor
 cp .env.example .env
 go build -o executor-agent .
 cp config.temp config.json
@@ -81,7 +67,7 @@ cp config.temp config.json
 ./executor-agent -config ./config.json
 ```
 
-See `secrux-executor/README.md` for details (TLS, CA cert, token).
+See `apps/executor/README.md` for details (TLS, CA cert, token).
 
 ## Configuration
 
@@ -119,7 +105,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-3. Executor nodes (binary, no Docker container for the agent): `secrux-executor/README.md`
+3. Executor nodes (binary, no Docker container for the agent): `apps/executor/README.md`
 
 ## More docs
 

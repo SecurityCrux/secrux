@@ -3,7 +3,7 @@
 [中文说明](DEPLOYMENT.zh-CN.md)
 
 > This document focuses on getting Secrux running and usable. It covers recommended deployment for dev/test/prod, dependencies, port planning, verification, and troubleshooting.  
-> If you only want to run backend dependencies locally, see `docs/STARTUP.md` (note: the Gradle Wrapper lives at `secrux-server/gradlew`).
+> If you only want to run backend dependencies locally, see `docs/STARTUP.md` (note: the Gradle Wrapper lives at `apps/server/gradlew`).
 
 ## 1. What you are deploying
 
@@ -26,12 +26,12 @@ Typical use cases:
 
 | Component | Directory | Purpose | Runtime |
 |---|---|---|---|
-| Control plane API | `secrux-server/` | AuthN/AuthZ, task orchestration, results storage, REST API, Executor Gateway | Spring Boot (JDK 21) |
-| Console UI | `secrux-web/` | UI for tasks/logs/results/AI config | Vite + React (built static assets) |
-| Executor agent | `secrux-executor/` | Connects to Executor Gateway, launches engine containers, uploads logs/results | Go binary + Docker |
-| Engines/scripts | `secrux-engine/` | Engine images + run scripts (Semgrep/Trivy, etc.) | Docker images/scripts |
-| AI microservice | `secrux-ai/` | AI jobs, agents/MCP, Knowledge Base (RAG) | FastAPI + Postgres |
-| Single-machine quickstart | `docker-compose.yml` | Postgres/Kafka/Redis/Keycloak + `secrux-server` + console (service `secrux-console`) + `secrux-ai` | Docker Compose |
+| Control plane API | `apps/server/` | AuthN/AuthZ, task orchestration, results storage, REST API, Executor Gateway | Spring Boot (JDK 21) |
+| Console UI | `apps/web/` | UI for tasks/logs/results/AI config | Vite + React (built static assets) |
+| Executor agent | `apps/executor/` | Connects to Executor Gateway, launches engine containers, uploads logs/results | Go binary + Docker |
+| Engines/scripts | `apps/engines/` | Engine images + run scripts (Semgrep/Trivy, etc.) | Docker images/scripts |
+| AI microservice | `apps/ai/` | AI jobs, agents/MCP, Knowledge Base (RAG) | FastAPI + Postgres |
+| Single-machine quickstart | `docker/docker-compose.yml` | Postgres/Kafka/Redis/Keycloak + `secrux-server` + console (service `secrux-console`) + `secrux-ai` | Docker Compose |
 
 ### 2.2 High-level data flow
 
@@ -49,7 +49,7 @@ Console  --(REST/JWT)-->  secrux-server  --(SQL)--> Postgres
 
 ## 3. Ports, domains, and network requirements
 
-### 3.1 Default ports (repo `docker-compose.yml`)
+### 3.1 Default ports (repo `docker/docker-compose.yml`)
 
 | Service | Port | Notes |
 |---|---:|---|
@@ -80,28 +80,28 @@ Console  --(REST/JWT)-->  secrux-server  --(SQL)--> Postgres
 
 - Docker & Docker Compose
 - JDK 21
-- Node.js 18+ (for `secrux-web`)
-- Go 1.22+ (for `secrux-executor`)
+- Node.js 18+ (for `apps/web`)
+- Go 1.22+ (for `apps/executor`)
 
 ### 4.2 Start infra dependencies (Postgres/Kafka/Redis/Keycloak/AI)
 
 From repo root:
 
 ```bash
-docker compose up -d postgres redis zookeeper kafka keycloak
+docker compose -f docker/docker-compose.yml up -d postgres redis zookeeper kafka keycloak
 # Optional (start AI only when needed):
-# docker compose up -d ai-postgres ai-service
-docker compose ps
+# docker compose -f docker/docker-compose.yml up -d ai-postgres ai-service
+docker compose -f docker/docker-compose.yml ps
 ```
 
 > For “one-command full-stack quickstart” (server + console + AI), see repo root `README.md`.
 
 ### 4.3 Start the backend API (Spring Boot)
 
-In `secrux-server/`:
+In `apps/server/`:
 
 ```bash
-cd secrux-server
+cd apps/server
 ./gradlew flywayMigrate
 SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 ```
@@ -114,15 +114,15 @@ Verify:
 
 ### 4.4 Start the console (Vite dev server)
 
-In `secrux-web/`:
+In `apps/web/`:
 
 ```bash
-cd secrux-web
+cd apps/web
 npm install
 npm run dev
 ```
 
-Console config (defaults usually work; override via `secrux-web/.env.local` if needed):
+Console config (defaults usually work; override via `apps/web/.env.local` if needed):
 
 - `VITE_API_BASE_URL` (default `http://localhost:8080`)
 - `VITE_OIDC_BASE_URL` (default `http://localhost:8081`)
@@ -133,7 +133,7 @@ Console config (defaults usually work; override via `secrux-web/.env.local` if n
 
 `docs/STARTUP.md` provides a copy-paste curl example. The dev realm includes a seeded `secrux/secrux` user and `secrux-api` client.
 
-### 4.6 Register an executor and run the agent (`secrux-executor`)
+### 4.6 Register an executor and run the agent (`apps/executor`)
 
 1) Register an executor (requires an admin Bearer token):
 
@@ -156,26 +156,26 @@ curl "http://localhost:8080/executors/<executorId>/token" \
   -H "Authorization: Bearer $KC_TOKEN"
 ```
 
-2) Prepare executor config: copy `secrux-executor/config.temp`, fill the token and gateway address (do not commit real tokens):
+2) Prepare executor config: copy `apps/executor/config.temp`, fill the token and gateway address (do not commit real tokens):
 
 ```bash
-cp secrux-executor/config.temp /tmp/secrux-agent.json
+cp apps/executor/config.temp /tmp/secrux-agent.json
 ```
 
 3) Start the agent (requires local Docker Engine with access to `/var/run/docker.sock`):
 
 ```bash
-cd secrux-executor
+cd apps/executor
 go build -o executor-agent .
 ./executor-agent -config /tmp/secrux-agent.json
 ```
 
 4) Engine images (optional)
 
-- If you want local engine images (matching the example mappings), build them in `secrux-engine/`:
+- If you want local engine images (matching the example mappings), build them in `apps/engines/`:
 
 ```bash
-cd secrux-engine
+cd apps/engines
 ./build-local-engines.sh
 ```
 
@@ -183,17 +183,17 @@ cd secrux-engine
 
 ## 5. Single-node / test deployment (no K8s)
 
-The repo root `docker-compose.yml` provides a “single-machine quickstart” full stack (including UI/AI). In test environments you can also run only infra services (Postgres/Kafka/Keycloak, etc.) and deploy each module separately:
+The repo `docker/docker-compose.yml` provides a “single-machine quickstart” full stack (including UI/AI). In test environments you can also run only infra services (Postgres/Kafka/Keycloak, etc.) and deploy each module separately:
 
-- `secrux-server`: build a fat jar and run via systemd or containers.
-- `secrux-web`: build static assets (`npm run build`) and serve via Nginx/Caddy/object storage.
-- `secrux-executor`: install as a systemd service on executor hosts (requires Docker Engine on the host).
-- `secrux-ai`: run as containers per your internal standards.
+- `apps/server`: build a fat jar and run via systemd or containers.
+- `apps/web`: build static assets (`npm run build`) and serve via Nginx/Caddy/object storage.
+- `apps/executor`: install as a systemd service on executor hosts (requires Docker Engine on the host).
+- `apps/ai`: run as containers per your internal standards.
 
-### 5.1 Build `secrux-server`
+### 5.1 Build `apps/server`
 
 ```bash
-cd secrux-server
+cd apps/server
 ./gradlew test
 ./gradlew bootJar
 ls -la build/libs
@@ -205,15 +205,15 @@ Run (example):
 java -jar build/libs/secrux-server-*.jar
 ```
 
-### 5.2 Build `secrux-web`
+### 5.2 Build `apps/web`
 
 ```bash
-cd secrux-web
+cd apps/web
 npm ci
 npm run build
 ```
 
-Deploy `secrux-web/dist/` as a static site; for production, use a reverse proxy to unify domain and HTTPS.
+Deploy `apps/web/dist/` as a static site; for production, use a reverse proxy to unify domain and HTTPS.
 
 ## 6. Production deployment recommendations
 
@@ -243,7 +243,7 @@ Deploy `secrux-web/dist/` as a static site; for production, use a reverse proxy 
 
 ## 7. Post-deploy verification checklist
 
-1. `docker compose ps`: dependencies are healthy.
+1. `docker compose -f docker/docker-compose.yml ps`: dependencies are healthy.
 2. `GET http://<api>/actuator/health`: control plane is healthy.
 3. `GET http://<ai>/health`: AI service is healthy.
 4. Keycloak login and token issuance work (Console can redirect to login).
@@ -252,7 +252,7 @@ Deploy `secrux-web/dist/` as a static site; for production, use a reverse proxy 
 
 ## 8. Troubleshooting
 
-- **`./gradlew` not found**: run it from `secrux-server/` (wrapper is at `secrux-server/gradlew`).
+- **`./gradlew` not found**: run it from `apps/server/` (wrapper is at `apps/server/gradlew`).
 - **executor agent cannot connect to 5155**: ensure `executor.gateway.enabled=true` (enabled in local profile) and check firewall/certificates.
 - **executor agent cannot download uploads**: verify `SECRUX_EXECUTOR_API_BASE_URL` is reachable from executors and `X-Executor-Token` matches the issued token.
 - **repo clone needs credentials**: fill BASIC/TOKEN auth in the “Repository” dialog; the platform encrypts and stores it and provides it to executors in task payloads.
