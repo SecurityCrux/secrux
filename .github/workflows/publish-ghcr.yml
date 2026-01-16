@@ -36,18 +36,20 @@ jobs:
         run: |
           set -euo pipefail
 
+          registry_image="$(echo "${REGISTRY_IMAGE}" | tr '[:upper:]' '[:lower:]')"
+
           tag="${{ github.event.release.tag_name }}"
           prerelease="${{ github.event.release.prerelease }}"
 
           stripped="${tag#v}"
 
-          tags=("${REGISTRY_IMAGE}:${tag}")
+          tags=("${registry_image}:${tag}")
           if [[ "${stripped}" != "${tag}" ]]; then
-            tags+=("${REGISTRY_IMAGE}:${stripped}")
+            tags+=("${registry_image}:${stripped}")
           fi
 
           if [[ "${prerelease}" != "true" && "${tag}" != *"-"* ]]; then
-            tags+=("${REGISTRY_IMAGE}:latest")
+            tags+=("${registry_image}:latest")
           fi
 
           {
@@ -66,3 +68,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Set package visibility to public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          package="$(echo "${REPOSITORY##*/}" | tr '[:upper:]' '[:lower:]')"
+
+          if gh api -X PATCH "/orgs/${OWNER}/packages/container/${package}/visibility" -f visibility=public >/dev/null 2>&1; then
+            echo "Set org package visibility to public: ${package}"
+            exit 0
+          fi
+
+          gh api -X PATCH "/users/${OWNER}/packages/container/${package}/visibility" -f visibility=public >/dev/null
+          echo "Set user package visibility to public: ${package}"
