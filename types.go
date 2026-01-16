@@ -24,6 +24,7 @@ type TrivyConfig struct {
 	SanitizePomRepositories bool
 	BannedMavenRepoHosts    []string
 	FilesystemCopyMode      string
+	TimeoutSec              int
 	MavenRepositoryPath     string
 	MavenSettingsPath       string
 	CacheHostPath           string
@@ -34,6 +35,7 @@ type TrivyFileConfig struct {
 	SanitizePomRepositories *bool    `json:"sanitizePomRepositories"`
 	BannedMavenRepoHosts    []string `json:"bannedMavenRepoHosts"`
 	FilesystemCopyMode      string   `json:"filesystemCopyMode"`
+	TimeoutSec              int      `json:"timeoutSec"`
 	MavenRepositoryPath     string   `json:"mavenRepositoryPath"`
 	MavenSettingsPath       string   `json:"mavenSettingsPath"`
 	CacheHostPath           string   `json:"cacheHostPath"`
