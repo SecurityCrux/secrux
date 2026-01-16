@@ -1,0 +1,82 @@
+name: Release app artifacts
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-assets-apps-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Build server jar
+        working-directory: apps/server
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon bootJar
+
+      - name: Package server jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          jars=(apps/server/build/libs/*.jar)
+          jar=""
+          for candidate in "${jars[@]}"; do
+            if [[ "${candidate}" != *"-plain.jar" ]]; then
+              jar="${candidate}"
+              break
+            fi
+          done
+          if [[ -z "${jar}" ]]; then
+            echo "No boot jar found in apps/server/build/libs" >&2
+            exit 1
+          fi
+          mkdir -p dist
+          cp "${jar}" "dist/secrux-server_${tag}.jar"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Build web dist
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Package web dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          mkdir -p dist
+          tar -czf "dist/secrux-web_dist_${tag}.tar.gz" -C apps/web dist
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" dist/* --clobber
