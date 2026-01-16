@@ -36,8 +36,8 @@ export function CodeSnippetView({
   }, [snippet.lines, language])
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-md border">
-      <div className="border-b bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+    <div className="min-w-0 overflow-hidden rounded-md border border-border bg-muted/10">
+      <div className="border-b border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
         <div className="break-all">{snippet.path}</div>
         <div className="mt-1">
           {snippet.startLine} - {snippet.endLine}
@@ -49,17 +49,20 @@ export function CodeSnippetView({
             return (
               <div key={`gap-${idx}`} className="grid grid-cols-[64px,1fr] items-start gap-3 px-3 py-1 text-sm">
                 <span className="text-right text-xs text-muted-foreground"></span>
-                <code className="min-w-0 whitespace-pre-wrap break-words text-muted-foreground italic">…</code>
+                <code className="min-w-0 whitespace-pre-wrap break-words font-mono text-muted-foreground italic">…</code>
               </div>
             )
           }
           return (
             <div
               key={line.lineNumber}
-              className={`grid grid-cols-[64px,1fr] items-start gap-3 px-3 py-1 text-sm ${line.highlight ? "bg-amber-50" : ""}`}
+              className={`grid grid-cols-[64px,1fr] items-start gap-3 px-3 py-1 text-sm ${line.highlight ? "bg-amber-50/70 dark:bg-amber-500/10" : ""}`}
             >
               <span className="text-right text-xs text-muted-foreground">{line.lineNumber}</span>
-              <code className="hljs min-w-0 whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: line.html }} />
+              <code
+                className="hljs min-w-0 whitespace-pre-wrap break-words font-mono"
+                dangerouslySetInnerHTML={{ __html: line.html }}
+              />
             </div>
           )
         })}
@@ -97,4 +100,3 @@ function guessLanguage(path: string): string | undefined {
   if (lower.endsWith(".sql")) return "sql"
   return undefined
 }
-
