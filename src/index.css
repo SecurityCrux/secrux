@@ -35,24 +35,24 @@
 
 .dark {
   --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
-  --card-foreground: 210 40% 98%;
-  --popover: 222.2 84% 4.9%;
-  --popover-foreground: 210 40% 98%;
-  --primary: 221.2 83.2% 53.3%;
+  --foreground: 215 20% 92%;
+  --card: 222.2 84% 6.8%;
+  --card-foreground: 215 20% 92%;
+  --popover: 222.2 84% 6.8%;
+  --popover-foreground: 215 20% 92%;
+  --primary: 224.3 76.3% 48%;
   --primary-foreground: 210 40% 98%;
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
+  --secondary: 217.2 32.6% 13.5%;
+  --secondary-foreground: 215 20% 92%;
+  --muted: 217.2 32.6% 12.5%;
   --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
+  --accent: 217.2 32.6% 14.5%;
+  --accent-foreground: 215 20% 92%;
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 221.2 83.2% 53.3%;
+  --border: 217.2 32.6% 13.5%;
+  --input: 217.2 32.6% 13.5%;
+  --ring: 224.3 76.3% 48%;
 }
 
 @layer base {
@@ -68,6 +68,12 @@ body {
 }
 
 /* highlight.js (code snippets): fix dark-mode white background + improve contrast */
+.secrux-code-snippet code.hljs {
+  background: transparent;
+  padding: 0;
+  color: hsl(var(--foreground));
+}
+
 .light code.hljs,
 .dark code.hljs {
   background: transparent;

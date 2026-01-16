@@ -36,7 +36,7 @@ export function CodeSnippetView({
   }, [snippet.lines, language])
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-md border border-border bg-muted/10">
+    <div className="secrux-code-snippet min-w-0 overflow-hidden rounded-md border border-border bg-muted/10">
       <div className="border-b border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
         <div className="break-all">{snippet.path}</div>
         <div className="mt-1">
